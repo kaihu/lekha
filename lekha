@@ -168,7 +168,7 @@ class Document(StandardWindow):
                     old_size = c.size_hint_min
                     new_size = [i * 1.2 for i in old_size]
                     c.size_hint_min = new_size
-                    c.size_hint_max = new_size
+                    #c.size_hint_max = new_size
             elif ev.key == "minus":
                 self.doc_zoom *= 0.8
                 for c in self.page_box:
@@ -177,7 +177,7 @@ class Document(StandardWindow):
                         return
                     new_size = [i * 0.8 for i in old_size]
                     c.size_hint_min = new_size
-                    c.size_hint_max = new_size
+                    #c.size_hint_max = new_size
 
     @staticmethod
     def viewport_in(obj, n):
@@ -225,7 +225,6 @@ class PageSmart(Smart):
             obj.callback_call("viewport,in")
             for img in pv_img, hq_img:
                 img.file = (obj.doc_path, str(obj.page_num))
-                img.data["preloading"] = True
                 img.preload()
             log.debug("preloading %d %r %r", obj.page_num, r1, r2)
         else:
@@ -235,7 +234,6 @@ class PageSmart(Smart):
             obj.callback_call("viewport,out")
             log.debug("hiding %d %r %r", obj.page_num, r1, r2)
             for img in pv_img, hq_img:
-                img.data["preloading"] = False
                 img.image_data_set(None)
                 img.hide()
 
@@ -292,13 +290,11 @@ class Page(SmartObject):
 
         self.pv_img = FilledImage(evas, load_dpi=1, load_size=(w/2, h/2))
         self.member_add(self.pv_img)
-        self.pv_img.data["preloading"] = False
 
         self.pv_img.on_image_preloaded_add(self.pv_preloaded)
 
         self.hq_img = FilledImage(evas, load_dpi=1, load_size=(w*4, h*4))
         self.member_add(self.hq_img)
-        self.hq_img.data["preloading"] = False
 
         self.hq_img.on_image_preloaded_add(self.hq_preloaded, self.pv_img)
 
@@ -306,19 +302,17 @@ class Page(SmartObject):
         h = float(h) * zoom
 
         self.size_hint_min = w, h
-        self.size_hint_max = w, h
+        #self.size_hint_max = w, h
 
         self.pass_events = True
 
     def hq_preloaded(self, hq_img, pv_img):
         log.debug("preloaded %d", self.page_num)
-        hq_img.data["preloading"] = False
         pv_img.hide()
         hq_img.show()
 
     @staticmethod
     def pv_preloaded(pv_img):
-        pv_img.data["preloading"] = False
         pv_img.show()
 
 
