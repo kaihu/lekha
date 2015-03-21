@@ -1,0 +1,392 @@
+#!/usr/bin/python
+#
+#  Lekha - A PDF document viewer
+#
+#  Copyright 2015 Kai Huuhko <kai.huuhko@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+from __future__ import print_function
+
+import time
+import logging
+import argparse
+import json
+import os
+
+from efl.ecore import Idler
+
+import efl.evas as evas
+from efl.evas import Smart, SmartObject, FilledImage, EXPAND_BOTH, FILL_BOTH, \
+    EVAS_CALLBACK_KEY_DOWN, EVAS_CALLBACK_KEY_UP, EVAS_CALLBACK_MOUSE_WHEEL, \
+    Rect, Rectangle, EXPAND_HORIZ, FILL_HORIZ
+
+import efl.elementary as elm
+from efl.elementary import ELM_POLICY_QUIT, ELM_POLICY_QUIT_LAST_WINDOW_CLOSED
+from efl.elementary.configuration import Configuration
+from efl.elementary.window import StandardWindow
+from efl.elementary.box import Box
+from efl.elementary.scroller import Scroller
+from efl.elementary.button import Button
+from efl.elementary.notify import Notify
+from efl.elementary.label import Label
+from efl.elementary.spinner import Spinner
+from efl.elementary.progressbar import Progressbar
+
+import PyPDF2
+
+from xdg import BaseDirectory
+
+
+class Document(StandardWindow):
+
+    def __init__(self, doc_path, doc_zoom=1.0, doc_pos=None):
+        self.doc_path = doc_path
+        self.doc_zoom = doc_zoom
+        self.doc_pos = doc_pos
+        self.pages = []
+
+        t1 = self.t1 = time.clock()
+        doc = PyPDF2.PdfFileReader(doc_path)
+        info = doc.getDocumentInfo()
+        t2 = time.clock()
+
+        log.info("%s %s %s %s %s", info.title, info.author, info.subject, info.creator, info.producer)
+
+        log.info("Reading the doc took: %f", t2-t1)
+
+        if info.title and info.author:
+            title = "{0} by {1}".format(info.title, info.author)
+        else:
+            title = doc_path
+
+        super(Document, self).__init__(
+            doc_path, title,
+            size=(400 * SCALE, 400 * SCALE),
+            autodel=True)
+
+        main_box = Box(self, size_hint_weight=EXPAND_BOTH, align=(0.5, 0.0))
+        self.resize_object_add(main_box)
+
+        scr = self.scr = Scroller(main_box, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
+        scr.callback_scroll_add(self.scrolled)
+        main_box.pack_end(scr)
+
+        box = self.page_box = Box(scr, size_hint_weight=EXPAND_BOTH, size_hint_align=(0.5, 0.0))
+        scr.content = box
+
+        self.elm_event_callback_add(self.event_handler)
+        self.on_resize_add(self.resized)
+
+        toolbox = Box(main_box, horizontal=True, size_hint_weight=EXPAND_HORIZ)
+
+        spn = self.spn = Spinner(toolbox, round=1.0)
+        spn.special_value_add(1, "First")
+        toolbox.pack_end(spn)
+
+        btn = Button(toolbox, text="show page")
+        btn.callback_clicked_add(self.bring_in, spn, scr, self.pages)
+        toolbox.pack_end(btn)
+
+        for c in toolbox:
+            c.show()
+
+        main_box.pack_end(toolbox)
+
+        for c in main_box:
+            c.show()
+
+        n = self.page_notify = Notify(scr, align=(0.02, 0.02))
+        b = Box(n, horizontal=True, padding=(6, 0))
+        n.content = b
+
+        n = self.load_notify = Notify(scr, align=(0.98, 0.98))
+        pb = Progressbar(n, pulse_mode=True, style="wheel")
+        n.content = pb
+        pb.pulse(True)
+        n.show()
+
+        main_box.show()
+        self.show()
+
+        idler = Idler(self.populate_page, enumerate(doc.pages, start=0))
+        self.callback_delete_request_add(lambda x: idler.delete())
+
+    def populate_page(self, itr):
+        try:
+            pg_num, pg = next(itr)
+        except StopIteration:
+            t = time.clock()
+            log.info("Total time to open the document: %f", t - self.t1)
+            self.load_notify.content.pulse(False)
+            self.load_notify.hide()
+            self.spn.special_value_add(self.page_count, "Last")
+            if self.doc_pos is not None:
+                self.scr.region_show(*self.doc_pos)
+            return False
+
+        mbox = pg.mediaBox
+        w, h = mbox[2], mbox[3]
+
+        box = self.page_box
+
+        page = Page(box, self.doc_path, pg_num, w, h, self.doc_zoom)
+        page.callback_add("viewport,in", self.viewport_in, self.page_notify)
+        page.callback_add("viewport,out", self.viewport_out, self.page_notify)
+        box.pack_end(page)
+        page.show()
+
+        self.pages.append((pg.indirectRef.idnum, page))
+
+        self.page_count = pg_num + 1
+        self.spn.min_max = (1, self.page_count)
+
+        return True
+
+    @staticmethod
+    def resized(obj):
+        for page in obj.page_box:
+            page.changed()
+
+    def event_handler(self, obj, src, tp, ev):
+        if tp == EVAS_CALLBACK_KEY_UP:
+            if ev.key == "plus":
+                self.doc_zoom *= 1.2
+                for c in self.page_box:
+                    old_size = c.size_hint_min
+                    new_size = [i * 1.2 for i in old_size]
+                    c.size_hint_min = new_size
+                    c.size_hint_max = new_size
+            elif ev.key == "minus":
+                self.doc_zoom *= 0.8
+                for c in self.page_box:
+                    old_size = c.size_hint_min
+                    if old_size[0] < 50 or old_size[1] < 50:
+                        return
+                    new_size = [i * 0.8 for i in old_size]
+                    c.size_hint_min = new_size
+                    c.size_hint_max = new_size
+
+    @staticmethod
+    def viewport_in(obj, n):
+        l = obj.page_num_label
+        b = n.content
+        b.pack_end(l)
+        n.timeout = 3
+        l.show()
+        n.show()
+
+    @staticmethod
+    def viewport_out(obj, n):
+        l = obj.page_num_label
+        b = n.content
+        b.unpack(l)
+        l.hide()
+        n.show()
+
+    @staticmethod
+    def bring_in(btn, spn, scr, pages):
+        pg_id, pg = pages[int(round(spn.value))-1]
+        x1, y1, w1, h1 = scr.region
+        x2, y2, w2, h2 = pg.geometry
+        new_x = x1 + x2
+        new_y = y1 + y2
+        scr.region_show(new_x, new_y, 0, h1)
+
+    def scrolled(self, scr):
+        self.doc_pos = scr.region
+
+
+class PageSmart(Smart):
+
+    @staticmethod
+    def check_visibility(obj, x, y, w, h):
+        r1 = Rect(x, y, w, h)
+        r2 = obj.evas.rect
+        hq_img = obj.hq_img
+        pv_img = obj.pv_img
+
+        if r1.intersects(r2):
+            if obj.in_viewport:
+                return
+            obj.in_viewport = True
+            obj.callback_call("viewport,in")
+            for img in pv_img, hq_img:
+                img.file = (obj.doc_path, str(obj.page_num))
+                img.data["preloading"] = True
+                img.preload()
+            log.debug("preloading %d %r %r", obj.page_num, r1, r2)
+        else:
+            if not obj.in_viewport:
+                return
+            obj.in_viewport = False
+            obj.callback_call("viewport,out")
+            log.debug("hiding %d %r %r", obj.page_num, r1, r2)
+            for img in pv_img, hq_img:
+                img.data["preloading"] = False
+                img.image_data_set(None)
+                img.hide()
+
+    def calculate(self, obj):
+        self.check_visibility(obj, *obj.geometry)
+
+    def resize(self, obj, w, h):
+        # x, y = obj.pos
+        log.debug("resize %d %d", w, h)
+        for child in obj:
+            child.resize(w, h)
+        # self.check_visibility(obj, x, y, w, h)
+
+    def move(self, obj, x, y):
+        log.debug("move %d %d", x, y)
+        w, h = obj.size
+        for child in obj:
+            child.move(x, y)
+        self.check_visibility(obj, x, y, w, h)
+
+    @staticmethod
+    def clip_set(obj, clip):
+        for child in obj:
+            child.clip_set(clip)
+
+    @staticmethod
+    def clip_unset(obj):
+        for child in obj:
+            child.clip_unset()
+
+    @staticmethod
+    def delete(obj):
+        for child in obj:
+            child.delete()
+
+smart = PageSmart()
+
+
+class Page(SmartObject):
+
+    def __init__(self, parent, doc_path, page_num, w, h, zoom=1.0):
+        self.doc_path = doc_path
+        self.page_num = page_num
+        self.in_viewport = False
+
+        evas = parent.evas
+        super(Page, self).__init__(evas, smart, parent=parent)
+
+        self.page_num_label = Label(parent, text=str(page_num + 1))
+
+        self.bg = Rectangle(evas, color=(255, 255, 255, 255))
+        self.member_add(self.bg)
+        self.bg.show()
+
+        self.pv_img = FilledImage(evas, load_dpi=1, load_size=(w/2, h/2))
+        self.member_add(self.pv_img)
+        self.pv_img.data["preloading"] = False
+
+        self.pv_img.on_image_preloaded_add(self.pv_preloaded)
+
+        self.hq_img = FilledImage(evas, load_dpi=1, load_size=(w*4, h*4))
+        self.member_add(self.hq_img)
+        self.hq_img.data["preloading"] = False
+
+        self.hq_img.on_image_preloaded_add(self.hq_preloaded, self.pv_img)
+
+        self.size_hint_min = w * zoom, h * zoom
+        self.size_hint_max = w * zoom, h * zoom
+
+        self.pass_events = True
+
+    def hq_preloaded(self, hq_img, pv_img):
+        log.debug("preloaded %d", self.page_num)
+        hq_img.data["preloading"] = False
+        pv_img.hide()
+        hq_img.show()
+
+    @staticmethod
+    def pv_preloaded(pv_img):
+        pv_img.data["preloading"] = False
+        pv_img.show()
+
+
+parser = argparse.ArgumentParser(description="Presenter of writings")
+parser.add_argument(
+    'documents', metavar='pdf', type=str, nargs='+',
+    help='documents you may want to display')
+args = parser.parse_args()
+
+handler = logging.StreamHandler()
+formatter = logging.Formatter(
+    "%(name)s [%(levelname)s] %(module)s:%(lineno)d   %(message)s")
+handler.setFormatter(formatter)
+
+efl_log = logging.getLogger("efl")
+efl_log.addHandler(handler)
+
+log = logging.getLogger("lekha")
+log.addHandler(handler)
+log.setLevel(logging.INFO)
+
+evas.init()
+elm.init()
+
+elm_conf = Configuration()
+SCALE = elm_conf.scale
+
+elm.policy_set(ELM_POLICY_QUIT, ELM_POLICY_QUIT_LAST_WINDOW_CLOSED)
+
+docs_pos = {}
+
+cfg_base_path = BaseDirectory.save_config_path("lekha")
+cfg_file_path = os.path.join(cfg_base_path, "document_positions")
+
+if not os.path.exists(cfg_file_path):
+    try:
+        open(cfg_file_path, "w").close()
+    except Exception as e:
+        log.debug(e)
+
+with open(cfg_file_path, "r") as fp:
+    try:
+        docs_pos = json.load(fp)
+    except Exception:
+        log.info("document positions could not be restored")
+
+docs = []
+
+for doc_path in args.documents:
+    try:
+        doc_zoom, doc_pos = docs_pos[doc_path]
+        assert isinstance(doc_zoom, float), "zoom is not float"
+        assert isinstance(doc_pos, list), "pos is not tuple"
+        assert len(doc_pos) == 4, "pos len is not 4"
+    except Exception as e:
+        log.info("document zoom and position could not be restored because: %r", e)
+        doc_pos = (0, 0, 0, 0)
+        doc_zoom = 1.0
+    docs.append(Document(doc_path, doc_zoom, doc_pos))
+
+elm.run()
+
+for d in docs:
+    path = d.doc_path
+    zoom = d.doc_zoom
+    pos = d.doc_pos
+    docs_pos[path] = (zoom, pos)
+
+with open(cfg_file_path, "w") as fp:
+    json.dump(docs_pos, fp, indent=4, separators=(',', ': '))
+
+elm.shutdown()
+evas.shutdown()
+logging.shutdown()
