@@ -302,8 +302,11 @@ class Page(SmartObject):
 
         self.hq_img.on_image_preloaded_add(self.hq_preloaded, self.pv_img)
 
-        self.size_hint_min = w * zoom, h * zoom
-        self.size_hint_max = w * zoom, h * zoom
+        w = float(w) * zoom
+        h = float(h) * zoom
+
+        self.size_hint_min = w, h
+        self.size_hint_max = w, h
 
         self.pass_events = True
 
