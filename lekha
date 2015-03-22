@@ -52,9 +52,11 @@ from xdg import BaseDirectory
 
 class Document(StandardWindow):
 
+    SIZE_MIN = 50
+
     def __init__(self, doc_path, doc_zoom=1.0, doc_pos=None):
         self.doc_path = doc_path
-        self.doc_zoom = doc_zoom
+        self._zoom = doc_zoom
         self.doc_pos = doc_pos
         self.pages = []
 
@@ -81,14 +83,14 @@ class Document(StandardWindow):
         self.resize_object_add(main_box)
 
         scr = self.scr = Scroller(main_box, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
-        scr.callback_scroll_add(self.scrolled)
+        scr.callback_scroll_add(self._scrolled)
         main_box.pack_end(scr)
 
         box = self.page_box = Box(scr, size_hint_weight=EXPAND_BOTH, size_hint_align=(0.5, 0.0))
         scr.content = box
 
-        self.elm_event_callback_add(self.event_handler)
-        self.on_resize_add(self.resized)
+        self.elm_event_callback_add(self._event_handler)
+        self.on_resize_add(self._resized)
 
         toolbox = Box(main_box, horizontal=True, size_hint_weight=EXPAND_HORIZ)
 
@@ -97,7 +99,7 @@ class Document(StandardWindow):
         toolbox.pack_end(spn)
 
         btn = Button(toolbox, text="show page")
-        btn.callback_clicked_add(self.bring_in, spn, scr, self.pages)
+        btn.callback_clicked_add(self._show_page_cb, spn)
         toolbox.pack_end(btn)
 
         for c in toolbox:
@@ -142,9 +144,9 @@ class Document(StandardWindow):
 
         box = self.page_box
 
-        page = Page(box, self.doc_path, pg_num, w, h, self.doc_zoom)
-        page.callback_add("viewport,in", self.viewport_in, self.page_notify)
-        page.callback_add("viewport,out", self.viewport_out, self.page_notify)
+        page = Page(box, self.doc_path, pg_num, w, h, self.zoom)
+        page.callback_add("viewport,in", self._viewport_in, self.page_notify)
+        page.callback_add("viewport,out", self._viewport_out, self.page_notify)
         box.pack_end(page)
         page.show()
 
@@ -156,31 +158,43 @@ class Document(StandardWindow):
         return True
 
     @staticmethod
-    def resized(obj):
+    def _resized(obj):
         for page in obj.page_box:
             page.changed()
 
-    def event_handler(self, obj, src, tp, ev):
+    @property
+    def zoom(self):
+        return self._zoom
+
+    @zoom.setter
+    def zoom(self, value):
+        self._zoom = value
+        for c in self.page_box:
+            old_size = c.size_hint_min
+            new_size = [i * value for i in old_size]
+            if (
+                    (old_size[0] >= self.SIZE_MIN or
+                     old_size[1] >= self.SIZE_MIN) and
+                    (new_size[0] < self.SIZE_MIN or
+                     new_size[1] < self.SIZE_MIN)):
+                return
+            c.size_hint_min = new_size
+
+    def zoom_in(self, value):
+        self.zoom += value
+
+    def zoom_out(self, value):
+        self.zoom -= value
+
+    def _event_handler(self, obj, src, tp, ev):
         if tp == EVAS_CALLBACK_KEY_UP:
             if ev.key == "plus":
-                self.doc_zoom *= 1.2
-                for c in self.page_box:
-                    old_size = c.size_hint_min
-                    new_size = [i * 1.2 for i in old_size]
-                    c.size_hint_min = new_size
-                    #c.size_hint_max = new_size
+                self.zoom *= 1.2
             elif ev.key == "minus":
-                self.doc_zoom *= 0.8
-                for c in self.page_box:
-                    old_size = c.size_hint_min
-                    if old_size[0] < 50 or old_size[1] < 50:
-                        return
-                    new_size = [i * 0.8 for i in old_size]
-                    c.size_hint_min = new_size
-                    #c.size_hint_max = new_size
+                self.zoom *= 0.8
 
     @staticmethod
-    def viewport_in(obj, n):
+    def _viewport_in(obj, n):
         l = obj.page_num_label
         b = n.content
         b.pack_end(l)
@@ -189,23 +203,26 @@ class Document(StandardWindow):
         n.show()
 
     @staticmethod
-    def viewport_out(obj, n):
+    def _viewport_out(obj, n):
         l = obj.page_num_label
         b = n.content
         b.unpack(l)
         l.hide()
         n.show()
 
-    @staticmethod
-    def bring_in(btn, spn, scr, pages):
-        pg_id, pg = pages[int(round(spn.value))-1]
-        x1, y1, w1, h1 = scr.region
+    def _show_page_cb(self, btn, spn):
+        pg_num = int(round(spn.value))-1
+        self.page_show(pg_num)
+
+    def page_show(self, pg_num):
+        pg_id, pg = self.pages[pg_num]
+        x1, y1, w1, h1 = self.scr.region
         x2, y2, w2, h2 = pg.geometry
         new_x = x1 + x2
         new_y = y1 + y2
-        scr.region_show(new_x, new_y, 0, h1)
+        self.scr.region_show(new_x, new_y, 0, h1)
 
-    def scrolled(self, scr):
+    def _scrolled(self, scr):
         self.doc_pos = scr.region
 
 
@@ -223,10 +240,10 @@ class PageSmart(Smart):
                 return
             obj.in_viewport = True
             obj.callback_call("viewport,in")
-            for img in pv_img, hq_img:
+            for img in (pv_img,):
                 img.file = (obj.doc_path, str(obj.page_num))
                 img.preload()
-            log.debug("preloading %d %r %r", obj.page_num, r1, r2)
+            log.debug("preloading pv %d %r %r", obj.page_num, r1, r2)
         else:
             if not obj.in_viewport:
                 return
@@ -242,13 +259,13 @@ class PageSmart(Smart):
 
     def resize(self, obj, w, h):
         # x, y = obj.pos
-        log.debug("resize %d %d", w, h)
+        #log.debug("resize %d %d", w, h)
         for child in obj:
             child.resize(w, h)
         # self.check_visibility(obj, x, y, w, h)
 
     def move(self, obj, x, y):
-        log.debug("move %d %d", x, y)
+        #log.debug("move %d %d", x, y)
         w, h = obj.size
         for child in obj:
             child.move(x, y)
@@ -302,18 +319,21 @@ class Page(SmartObject):
         h = float(h) * zoom
 
         self.size_hint_min = w, h
-        #self.size_hint_max = w, h
 
         self.pass_events = True
 
     def hq_preloaded(self, hq_img, pv_img):
-        log.debug("preloaded %d", self.page_num)
+        log.debug("preloaded hq %d", self.page_num)
         pv_img.hide()
         hq_img.show()
 
-    @staticmethod
-    def pv_preloaded(pv_img):
+    def pv_preloaded(self, pv_img):
+        log.debug("preloaded pv %d", self.page_num)
         pv_img.show()
+        for img in (self.hq_img,):
+            img.file = (self.doc_path, str(self.page_num))
+            img.preload()
+        log.debug("preloading hq %d", self.page_num)
 
 
 parser = argparse.ArgumentParser(description="Presenter of writings")
@@ -332,7 +352,7 @@ efl_log.addHandler(handler)
 
 log = logging.getLogger("lekha")
 log.addHandler(handler)
-log.setLevel(logging.INFO)
+log.setLevel(logging.DEBUG)
 
 evas.init()
 elm.init()
@@ -377,7 +397,7 @@ elm.run()
 
 for d in docs:
     path = d.doc_path
-    zoom = d.doc_zoom
+    zoom = d.zoom
     pos = d.doc_pos
     docs_pos[path] = (zoom, pos)
 
