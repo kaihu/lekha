@@ -73,11 +73,28 @@ class AppWindow(StandardWindow):
         self.resize_object_add(main_box)
 
         tb = Toolbar(
-            main_box,
+            self,  # For some reason item menus break when parent is main_box
             size_hint_weight=EXPAND_HORIZ, size_hint_align=FILL_HORIZ,
             select_mode=ELM_OBJECT_SELECT_MODE_NONE, icon_size=24)
         tb.item_append(
             "document-open", "Open", lambda x, y: Fs(self.document_open))
+
+        it = tb.item_append("zoom-in", "Zoom")
+        it.menu = True
+        tb.menu_parent = self
+        menu = it.menu
+        menu.item_add(
+            None, "Zoom In", "zoom-in",
+            lambda x, y: tabs.currentContent.zoom_in())
+        menu.item_add(
+            None, "Zoom Out", "zoom-out",
+            lambda x, y: tabs.currentContent.zoom_out())
+        menu.item_add(
+            None, "Zoom 1:1", "zoom-original",
+            lambda x, y: tabs.currentContent.zoom_orig())
+        menu.item_add(
+            None, "Zoom Fit", "zoom-fit-best",
+            lambda x, y: tabs.currentContent.zoom_fit())
 
         tabs = self.tabs = Tabs(main_box, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
 
@@ -134,8 +151,6 @@ class AppWindow(StandardWindow):
 
 class Document(Box):
 
-    SIZE_MIN = 50
-
     def __init__(self, parent, doc, doc_path, doc_zoom=1.0, doc_pos=None):
         self.doc_path = doc_path
         self._zoom = doc_zoom
@@ -163,6 +178,10 @@ class Document(Box):
         btn = Button(toolbox, text="show page")
         btn.callback_clicked_add(self._show_page_cb, spn)
         toolbox.pack_end(btn)
+
+        zlbl = self.zlbl = Label(
+            toolbox, text="%1.0f %%" % (self.zoom * 100.0))
+        toolbox.pack_end(zlbl)
 
         for c in toolbox:
             c.show()
@@ -223,30 +242,36 @@ class Document(Box):
 
     @zoom.setter
     def zoom(self, value):
-        self._zoom = value
         for c in self.page_box:
-            old_size = c.size_hint_min
-            new_size = [i * value for i in old_size]
-            if (
-                    (old_size[0] >= self.SIZE_MIN or
-                     old_size[1] >= self.SIZE_MIN) and
-                    (new_size[0] < self.SIZE_MIN or
-                     new_size[1] < self.SIZE_MIN)):
-                return
-            c.size_hint_min = new_size
+            c.zoom_set(value)
+        self._zoom = value
+        self.zlbl.text = "%1.0f %%" % (value * 100.0)
 
-    def zoom_in(self, value):
+    def zoom_in(self, value=0.2):
         self.zoom += value
 
-    def zoom_out(self, value):
+    def zoom_out(self, value=0.2):
         self.zoom -= value
+
+    def zoom_orig(self):
+        self.zoom = 1.0
+
+    def zoom_fit(self):
+        widest = 0
+        for c in self.page_box:
+            pw = c.size[0]
+            if pw > widest:
+                widest = pw
+
+        viewport_width = self.scr.region[2]
+        self.zoom *= viewport_width/widest
 
     def _event_handler(self, obj, src, tp, ev):
         if tp == EVAS_CALLBACK_KEY_UP:
             if ev.key == "plus":
-                self.zoom *= 1.2
+                self.zoom_in()
             elif ev.key == "minus":
-                self.zoom *= 0.8
+                self.zoom_out()
 
     @staticmethod
     def _viewport_in(obj, ei, n):
@@ -345,6 +370,7 @@ class PageSmart(Smart):
 class Page(SmartObject):
 
     SMART = PageSmart()
+    SIZE_MIN = 50
 
     def __init__(self, parent, doc_path, page_num, w, h, zoom=1.0):
         self.doc_path = doc_path
@@ -370,12 +396,26 @@ class Page(SmartObject):
 
         self.hq_img.on_image_preloaded_add(self.hq_preloaded, self.pv_img)
 
+        self.orig_w = float(w)
+        self.orig_h = float(h)
+
         w = float(w) * zoom
         h = float(h) * zoom
 
         self.size_hint_min = w, h
 
         self.pass_events = True
+
+    def zoom_set(self, value):
+        old_size = self.size_hint_min
+        new_size = [i * value for i in (self.orig_w, self.orig_h)]
+        if (
+                (old_size[0] >= self.SIZE_MIN or
+                 old_size[1] >= self.SIZE_MIN) and
+                (new_size[0] < self.SIZE_MIN or
+                 new_size[1] < self.SIZE_MIN)):
+            return
+        self.size_hint_min = new_size
 
     def hq_preloaded(self, hq_img, pv_img):
         log.debug("preloaded hq %d", self.page_num)
