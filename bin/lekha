@@ -1,0 +1,102 @@
+#!/usr/bin/python
+#
+#  Lekha - A PDF document viewer
+#
+#  Copyright 2015 Kai Huuhko <kai.huuhko@gmail.com>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <http://www.gnu.org/licenses/>.
+#
+
+import os
+import json
+import logging
+import argparse
+
+from xdg import BaseDirectory
+
+import efl.elementary as elm
+import efl.evas as evas
+
+from lekha import AppWindow
+
+parser = argparse.ArgumentParser(description="Presenter of writings")
+parser.add_argument(
+    'documents', metavar='pdf', type=str, nargs='+',
+    help='documents you may want to display')
+args = parser.parse_args()
+
+handler = logging.StreamHandler()
+formatter = logging.Formatter(
+    "%(name)s [%(levelname)s] %(module)s:%(lineno)d   %(message)s")
+handler.setFormatter(formatter)
+
+efl_log = logging.getLogger("efl")
+efl_log.addHandler(handler)
+
+log = logging.getLogger("lekha")
+log.addHandler(handler)
+log.setLevel(logging.ERROR)
+
+evas.init()
+elm.init()
+
+elm.policy_set(elm.ELM_POLICY_QUIT, elm.ELM_POLICY_QUIT_LAST_WINDOW_CLOSED)
+
+docs_pos = {}
+
+cfg_base_path = BaseDirectory.save_config_path("lekha")
+cfg_file_path = os.path.join(cfg_base_path, "document_positions")
+
+if not os.path.exists(cfg_file_path):
+    try:
+        open(cfg_file_path, "w").close()
+    except Exception as e:
+        log.debug(e)
+
+with open(cfg_file_path, "r") as fp:
+    try:
+        docs_pos = json.load(fp)
+    except Exception:
+        log.info("document positions could not be restored")
+
+app = AppWindow()
+
+docs = []
+
+for doc_path in args.documents:
+    try:
+        doc_zoom, doc_pos = docs_pos[doc_path]
+        assert isinstance(doc_zoom, float), "zoom is not float"
+        assert isinstance(doc_pos, list), "pos is not tuple"
+        assert len(doc_pos) == 4, "pos len is not 4"
+    except Exception as e:
+        log.info("document zoom and position could not be restored because: %r", e)
+        doc_pos = (0, 0, 0, 0)
+        doc_zoom = 1.0
+    docs.append(app.document_open(doc_path, doc_zoom, doc_pos))
+
+elm.run()
+
+for d in docs:
+    path = d.doc_path
+    zoom = d.zoom
+    pos = d.doc_pos
+    docs_pos[path] = (zoom, pos)
+
+with open(cfg_file_path, "w") as fp:
+    json.dump(docs_pos, fp, indent=4, separators=(',', ': '))
+
+elm.shutdown()
+evas.shutdown()
+logging.shutdown()

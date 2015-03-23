@@ -36,6 +36,7 @@ from efl.evas import Smart, SmartObject, FilledImage, EXPAND_BOTH, FILL_BOTH, \
 import efl.elementary as elm
 from efl.elementary import ELM_POLICY_QUIT, ELM_POLICY_QUIT_LAST_WINDOW_CLOSED
 from efl.elementary.configuration import Configuration
+elm_conf = Configuration()
 from efl.elementary.window import StandardWindow
 from efl.elementary.box import Box
 from efl.elementary.scroller import Scroller
@@ -49,17 +50,32 @@ import PyPDF2
 
 from xdg import BaseDirectory
 
+from .tabbedbox import Tabs, Tab
 
-class Document(StandardWindow):
 
-    SIZE_MIN = 50
+class AppWindow(StandardWindow):
 
-    def __init__(self, doc_path, doc_zoom=1.0, doc_pos=None):
-        self.doc_path = doc_path
-        self._zoom = doc_zoom
-        self.doc_pos = doc_pos
-        self.pages = []
+    def __init__(self, docs=None):
+        self.SCALE = elm_conf.scale
 
+        self.docs = []
+
+        super(AppWindow, self).__init__(
+            "main", "Lekha",
+            size=(400 * self.SCALE, 400 * self.SCALE),
+            autodel=True)
+
+        tabs = self.tabs = Tabs(self, size_hint_weight=EXPAND_BOTH)
+        self.resize_object_add(tabs)
+        tabs.show()
+
+        tabs.callback_add("tab,added", lambda x, y: print("added", y))
+        tabs.callback_add("tab,selected", lambda x, y: print("selected", y))
+        tabs.callback_add("tab,deleted", lambda x, y: print("deleted", y))
+
+        self.show()
+
+    def document_open(self, doc_path, doc_zoom, doc_pos):
         t1 = self.t1 = time.clock()
         doc = PyPDF2.PdfFileReader(doc_path)
         info = doc.getDocumentInfo()
@@ -70,21 +86,32 @@ class Document(StandardWindow):
         log.info("Reading the doc took: %f", t2-t1)
 
         if info.title and info.author:
-            title = "{0} by {1}".format(info.title, info.author)
+            doc_title = "{0}".format(info.title)
         else:
-            title = doc_path
+            doc_title = doc_path
 
-        super(Document, self).__init__(
-            doc_path, title,
-            size=(400 * SCALE, 400 * SCALE),
-            autodel=True)
+        content = Document(self, doc, doc_path, doc_zoom, doc_pos)
+        self.tabs.append(Tab(doc_title, content))
 
-        main_box = Box(self, size_hint_weight=EXPAND_BOTH, align=(0.5, 0.0))
-        self.resize_object_add(main_box)
+        idler = Idler(content.populate_page, enumerate(doc.pages, start=0))
+        self.callback_delete_request_add(lambda x: idler.delete())
 
-        scr = self.scr = Scroller(main_box, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
+
+class Document(Box):
+
+    SIZE_MIN = 50
+
+    def __init__(self, parent, doc, doc_path, doc_zoom=1.0, doc_pos=None):
+        self.doc_path = doc_path
+        self._zoom = doc_zoom
+        self.doc_pos = doc_pos
+        self.pages = []
+
+        super(Document, self).__init__(parent, size_hint_weight=EXPAND_BOTH, align=(0.5, 0.0))
+
+        scr = self.scr = Scroller(self, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
         scr.callback_scroll_add(self._scrolled)
-        main_box.pack_end(scr)
+        self.pack_end(scr)
 
         box = self.page_box = Box(scr, size_hint_weight=EXPAND_BOTH, size_hint_align=(0.5, 0.0))
         scr.content = box
@@ -92,7 +119,7 @@ class Document(StandardWindow):
         self.elm_event_callback_add(self._event_handler)
         self.on_resize_add(self._resized)
 
-        toolbox = Box(main_box, horizontal=True, size_hint_weight=EXPAND_HORIZ)
+        toolbox = Box(self, horizontal=True, size_hint_weight=EXPAND_HORIZ)
 
         spn = self.spn = Spinner(toolbox, round=1.0)
         spn.special_value_add(1, "First")
@@ -105,9 +132,9 @@ class Document(StandardWindow):
         for c in toolbox:
             c.show()
 
-        main_box.pack_end(toolbox)
+        self.pack_end(toolbox)
 
-        for c in main_box:
+        for c in self:
             c.show()
 
         n = self.page_notify = Notify(scr, align=(0.02, 0.02))
@@ -120,21 +147,15 @@ class Document(StandardWindow):
         pb.pulse(True)
         n.show()
 
-        main_box.show()
         self.show()
-
-        idler = Idler(self.populate_page, enumerate(doc.pages, start=0))
-        self.callback_delete_request_add(lambda x: idler.delete())
 
     def populate_page(self, itr):
         try:
             pg_num, pg = next(itr)
         except StopIteration:
-            t = time.clock()
-            log.info("Total time to open the document: %f", t - self.t1)
             self.load_notify.content.pulse(False)
             self.load_notify.hide()
-            self.spn.special_value_add(self.page_count, "Last")
+            self.spn.special_value_add(len(self.pages), "Last")
             if self.doc_pos is not None:
                 self.scr.region_show(*self.doc_pos)
             return False
@@ -152,8 +173,7 @@ class Document(StandardWindow):
 
         self.pages.append((pg.indirectRef.idnum, page))
 
-        self.page_count = pg_num + 1
-        self.spn.min_max = (1, self.page_count)
+        self.spn.min_max = (1, len(self.pages))
 
         return True
 
@@ -286,10 +306,10 @@ class PageSmart(Smart):
         for child in obj:
             child.delete()
 
-smart = PageSmart()
-
 
 class Page(SmartObject):
+
+    SMART = PageSmart()
 
     def __init__(self, parent, doc_path, page_num, w, h, zoom=1.0):
         self.doc_path = doc_path
@@ -297,7 +317,7 @@ class Page(SmartObject):
         self.in_viewport = False
 
         evas = parent.evas
-        super(Page, self).__init__(evas, smart, parent=parent)
+        super(Page, self).__init__(evas, self.SMART, parent=parent)
 
         self.page_num_label = Label(parent, text=str(page_num + 1))
 
@@ -335,75 +355,74 @@ class Page(SmartObject):
             img.preload()
         log.debug("preloading hq %d", self.page_num)
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Presenter of writings")
+    parser.add_argument(
+        'documents', metavar='pdf', type=str, nargs='+',
+        help='documents you may want to display')
+    args = parser.parse_args()
 
-parser = argparse.ArgumentParser(description="Presenter of writings")
-parser.add_argument(
-    'documents', metavar='pdf', type=str, nargs='+',
-    help='documents you may want to display')
-args = parser.parse_args()
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter(
+        "%(name)s [%(levelname)s] %(module)s:%(lineno)d   %(message)s")
+    handler.setFormatter(formatter)
 
-handler = logging.StreamHandler()
-formatter = logging.Formatter(
-    "%(name)s [%(levelname)s] %(module)s:%(lineno)d   %(message)s")
-handler.setFormatter(formatter)
+    efl_log = logging.getLogger("efl")
+    efl_log.addHandler(handler)
 
-efl_log = logging.getLogger("efl")
-efl_log.addHandler(handler)
+    log = logging.getLogger("lekha")
+    log.addHandler(handler)
+    log.setLevel(logging.DEBUG)
 
-log = logging.getLogger("lekha")
-log.addHandler(handler)
-log.setLevel(logging.DEBUG)
+    evas.init()
+    elm.init()
 
-evas.init()
-elm.init()
+    elm.policy_set(ELM_POLICY_QUIT, ELM_POLICY_QUIT_LAST_WINDOW_CLOSED)
 
-elm_conf = Configuration()
-SCALE = elm_conf.scale
+    docs_pos = {}
 
-elm.policy_set(ELM_POLICY_QUIT, ELM_POLICY_QUIT_LAST_WINDOW_CLOSED)
+    cfg_base_path = BaseDirectory.save_config_path("lekha")
+    cfg_file_path = os.path.join(cfg_base_path, "document_positions")
 
-docs_pos = {}
+    if not os.path.exists(cfg_file_path):
+        try:
+            open(cfg_file_path, "w").close()
+        except Exception as e:
+            log.debug(e)
 
-cfg_base_path = BaseDirectory.save_config_path("lekha")
-cfg_file_path = os.path.join(cfg_base_path, "document_positions")
+    with open(cfg_file_path, "r") as fp:
+        try:
+            docs_pos = json.load(fp)
+        except Exception:
+            log.info("document positions could not be restored")
 
-if not os.path.exists(cfg_file_path):
-    try:
-        open(cfg_file_path, "w").close()
-    except Exception as e:
-        log.debug(e)
+    app = AppWindow()
 
-with open(cfg_file_path, "r") as fp:
-    try:
-        docs_pos = json.load(fp)
-    except Exception:
-        log.info("document positions could not be restored")
+    docs = []
 
-docs = []
+    for doc_path in args.documents:
+        try:
+            doc_zoom, doc_pos = docs_pos[doc_path]
+            assert isinstance(doc_zoom, float), "zoom is not float"
+            assert isinstance(doc_pos, list), "pos is not tuple"
+            assert len(doc_pos) == 4, "pos len is not 4"
+        except Exception as e:
+            log.info("document zoom and position could not be restored because: %r", e)
+            doc_pos = (0, 0, 0, 0)
+            doc_zoom = 1.0
+        app.document_open(doc_path, doc_zoom, doc_pos)
 
-for doc_path in args.documents:
-    try:
-        doc_zoom, doc_pos = docs_pos[doc_path]
-        assert isinstance(doc_zoom, float), "zoom is not float"
-        assert isinstance(doc_pos, list), "pos is not tuple"
-        assert len(doc_pos) == 4, "pos len is not 4"
-    except Exception as e:
-        log.info("document zoom and position could not be restored because: %r", e)
-        doc_pos = (0, 0, 0, 0)
-        doc_zoom = 1.0
-    docs.append(Document(doc_path, doc_zoom, doc_pos))
+    elm.run()
 
-elm.run()
+    for d in app.docs:
+        path = d.doc_path
+        zoom = d.zoom
+        pos = d.doc_pos
+        docs_pos[path] = (zoom, pos)
 
-for d in docs:
-    path = d.doc_path
-    zoom = d.zoom
-    pos = d.doc_pos
-    docs_pos[path] = (zoom, pos)
+    with open(cfg_file_path, "w") as fp:
+        json.dump(docs_pos, fp, indent=4, separators=(',', ': '))
 
-with open(cfg_file_path, "w") as fp:
-    json.dump(docs_pos, fp, indent=4, separators=(',', ': '))
-
-elm.shutdown()
-evas.shutdown()
-logging.shutdown()
+    elm.shutdown()
+    evas.shutdown()
+    logging.shutdown()
