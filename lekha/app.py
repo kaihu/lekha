@@ -98,8 +98,8 @@ class AppWindow(StandardWindow):
 
         tabs = self.tabs = Tabs(main_box, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
 
-        # tabs.callback_add("tab,added", lambda x, y: print("added", y))
-        # tabs.callback_add("tab,selected", lambda x, y: print("selected", y))
+        tabs.callback_add("tab,added", lambda x, y: self.title_set(y.doc_title))
+        tabs.callback_add("tab,selected", lambda x, y: self.title_set(y.doc_title))
         tabs.callback_add("tab,deleted", lambda x, y: y.delete())
 
         main_box.pack_end(tb)
@@ -136,12 +136,12 @@ class AppWindow(StandardWindow):
 
         log.info("Reading the doc took: %f", t2-t1)
 
-        if info.title and info.author:
+        if info.title:
             doc_title = "{0}".format(info.title)
         else:
             doc_title = doc_path
 
-        content = Document(self, doc, doc_path, doc_zoom, doc_pos)
+        content = Document(self, doc_title, doc_path, doc_zoom, doc_pos)
         self.docs.append(content)
         self.tabs.append(Tab(doc_title, content))
 
@@ -151,7 +151,8 @@ class AppWindow(StandardWindow):
 
 class Document(Box):
 
-    def __init__(self, parent, doc, doc_path, doc_zoom=1.0, doc_pos=None):
+    def __init__(self, parent, doc_title, doc_path, doc_zoom=1.0, doc_pos=None):
+        self.doc_title = doc_title
         self.doc_path = doc_path
         self._zoom = doc_zoom
         self.doc_pos = doc_pos

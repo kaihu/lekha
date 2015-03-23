@@ -208,7 +208,7 @@ class Tab(object):
         sel_btn.callback_clicked_add(lambda x, y=self.content: show_func(y))
         sel_btn.show()
 
-        icn = Icon(parent_widget, standard="gtk-close")
+        icn = Icon(parent_widget, standard="window-close")
         icn.show()
 
         cls_btn = self._cls_btn = Button(
