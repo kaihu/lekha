@@ -55,10 +55,13 @@ from .tabbedbox import Tabs, Tab
 
 class AppWindow(StandardWindow):
 
-    def __init__(self, docs=None):
+    def __init__(self, doc_specs=[]):
         self.SCALE = elm_conf.scale
 
         self.docs = []
+
+        for doc_spec in doc_specs:
+            self.document_open(*doc_spec)
 
         super(AppWindow, self).__init__(
             "main", "Lekha",
@@ -69,16 +72,30 @@ class AppWindow(StandardWindow):
         self.resize_object_add(tabs)
         tabs.show()
 
-        tabs.callback_add("tab,added", lambda x, y: print("added", y))
-        tabs.callback_add("tab,selected", lambda x, y: print("selected", y))
-        tabs.callback_add("tab,deleted", lambda x, y: print("deleted", y))
+        # tabs.callback_add("tab,added", lambda x, y: print("added", y))
+        # tabs.callback_add("tab,selected", lambda x, y: print("selected", y))
+        tabs.callback_add("tab,deleted", lambda x, y: y.delete())
 
         self.show()
 
     def document_open(self, doc_path, doc_zoom, doc_pos):
+        try:
+            assert isinstance(doc_zoom, float), "zoom is not float"
+            assert isinstance(doc_pos, list), "pos is not tuple"
+            assert len(doc_pos) == 4, "pos len is not 4"
+        except Exception as e:
+            log.info("document zoom and position could not be restored because: %r", e)
+            doc_pos = (0, 0, 0, 0)
+            doc_zoom = 1.0
+
         t1 = self.t1 = time.clock()
-        doc = PyPDF2.PdfFileReader(doc_path)
-        info = doc.getDocumentInfo()
+        try:
+            doc = PyPDF2.PdfFileReader(doc_path)
+            info = doc.getDocumentInfo()
+        except Exception as e:
+            log.error("Document could not be opened because: %r" % e)
+            return
+        doc._flatten()
         t2 = time.clock()
 
         log.info("%s %s %s %s %s", info.title, info.author, info.subject, info.creator, info.producer)
@@ -379,7 +396,7 @@ if __name__ == "__main__":
 
     elm.policy_set(ELM_POLICY_QUIT, ELM_POLICY_QUIT_LAST_WINDOW_CLOSED)
 
-    docs_pos = {}
+    doc_specs = {}
 
     cfg_base_path = BaseDirectory.save_config_path("lekha")
     cfg_file_path = os.path.join(cfg_base_path, "document_positions")
@@ -392,7 +409,7 @@ if __name__ == "__main__":
 
     with open(cfg_file_path, "r") as fp:
         try:
-            docs_pos = json.load(fp)
+            doc_specs = json.load(fp)
         except Exception:
             log.info("document positions could not be restored")
 
@@ -401,16 +418,7 @@ if __name__ == "__main__":
     docs = []
 
     for doc_path in args.documents:
-        try:
-            doc_zoom, doc_pos = docs_pos[doc_path]
-            assert isinstance(doc_zoom, float), "zoom is not float"
-            assert isinstance(doc_pos, list), "pos is not tuple"
-            assert len(doc_pos) == 4, "pos len is not 4"
-        except Exception as e:
-            log.info("document zoom and position could not be restored because: %r", e)
-            doc_pos = (0, 0, 0, 0)
-            doc_zoom = 1.0
-        app.document_open(doc_path, doc_zoom, doc_pos)
+        app.document_open(doc_path, *doc_specs.get(doc_path, (None, None)))
 
     elm.run()
 
@@ -418,10 +426,10 @@ if __name__ == "__main__":
         path = d.doc_path
         zoom = d.zoom
         pos = d.doc_pos
-        docs_pos[path] = (zoom, pos)
+        doc_specs[path] = (zoom, pos)
 
     with open(cfg_file_path, "w") as fp:
-        json.dump(docs_pos, fp, indent=4, separators=(',', ': '))
+        json.dump(doc_specs, fp, indent=4, separators=(',', ': '))
 
     elm.shutdown()
     evas.shutdown()
