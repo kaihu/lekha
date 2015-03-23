@@ -37,7 +37,7 @@ import efl.elementary as elm
 from efl.elementary import ELM_POLICY_QUIT, ELM_POLICY_QUIT_LAST_WINDOW_CLOSED
 from efl.elementary.configuration import Configuration
 elm_conf = Configuration()
-from efl.elementary.window import StandardWindow
+from efl.elementary.window import StandardWindow, Window, ELM_WIN_DIALOG_BASIC
 from efl.elementary.box import Box
 from efl.elementary.scroller import Scroller
 from efl.elementary.button import Button
@@ -45,6 +45,9 @@ from efl.elementary.notify import Notify
 from efl.elementary.label import Label
 from efl.elementary.spinner import Spinner
 from efl.elementary.progressbar import Progressbar
+from efl.elementary.toolbar import Toolbar, ELM_OBJECT_SELECT_MODE_NONE
+from efl.elementary.fileselector import Fileselector
+from efl.elementary.background import Background
 
 import PyPDF2
 
@@ -55,30 +58,44 @@ from .tabbedbox import Tabs, Tab
 
 class AppWindow(StandardWindow):
 
-    def __init__(self, doc_specs=[]):
-        self.SCALE = elm_conf.scale
+    def __init__(self, doc_specs={}):
+        SCALE = elm_conf.scale
 
         self.docs = []
-
-        for doc_spec in doc_specs:
-            self.document_open(*doc_spec)
+        self.doc_specs = doc_specs
 
         super(AppWindow, self).__init__(
             "main", "Lekha",
-            size=(400 * self.SCALE, 400 * self.SCALE),
+            size=(400 * SCALE, 400 * SCALE),
             autodel=True)
 
-        tabs = self.tabs = Tabs(self, size_hint_weight=EXPAND_BOTH)
-        self.resize_object_add(tabs)
-        tabs.show()
+        main_box = Box(self, size_hint_weight=EXPAND_BOTH)
+        self.resize_object_add(main_box)
+
+        tb = Toolbar(
+            main_box,
+            size_hint_weight=EXPAND_HORIZ, size_hint_align=FILL_HORIZ,
+            select_mode=ELM_OBJECT_SELECT_MODE_NONE, icon_size=24)
+        tb.item_append(
+            "document-open", "Open", lambda x, y: Fs(self.document_open))
+
+        tabs = self.tabs = Tabs(main_box, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
 
         # tabs.callback_add("tab,added", lambda x, y: print("added", y))
         # tabs.callback_add("tab,selected", lambda x, y: print("selected", y))
         tabs.callback_add("tab,deleted", lambda x, y: y.delete())
 
-        self.show()
+        main_box.pack_end(tb)
+        main_box.pack_end(tabs)
+        tb.show()
+        tabs.show()
 
-    def document_open(self, doc_path, doc_zoom, doc_pos):
+        main_box.show()
+
+    def document_open(self, doc_path):
+        if not doc_path:
+            return
+        doc_zoom, doc_pos = self.doc_specs.get(doc_path, [None, None])
         try:
             assert isinstance(doc_zoom, float), "zoom is not float"
             assert isinstance(doc_pos, list), "pos is not tuple"
@@ -93,7 +110,7 @@ class AppWindow(StandardWindow):
             doc = PyPDF2.PdfFileReader(doc_path)
             info = doc.getDocumentInfo()
         except Exception as e:
-            log.error("Document could not be opened because: %r" % e)
+            log.exception("Document could not be opened because: %r" % e)
             return
         doc._flatten()
         t2 = time.clock()
@@ -108,6 +125,7 @@ class AppWindow(StandardWindow):
             doc_title = doc_path
 
         content = Document(self, doc, doc_path, doc_zoom, doc_pos)
+        self.docs.append(content)
         self.tabs.append(Tab(doc_title, content))
 
         idler = Idler(content.populate_page, enumerate(doc.pages, start=0))
@@ -231,7 +249,7 @@ class Document(Box):
                 self.zoom *= 0.8
 
     @staticmethod
-    def _viewport_in(obj, n):
+    def _viewport_in(obj, ei, n):
         l = obj.page_num_label
         b = n.content
         b.pack_end(l)
@@ -240,7 +258,7 @@ class Document(Box):
         n.show()
 
     @staticmethod
-    def _viewport_out(obj, n):
+    def _viewport_out(obj, ei, n):
         l = obj.page_num_label
         b = n.content
         b.unpack(l)
@@ -372,10 +390,35 @@ class Page(SmartObject):
             img.preload()
         log.debug("preloading hq %d", self.page_num)
 
+
+class Fs(Window):
+
+    def __init__(self, done_cb):
+        SCALE = elm_conf.scale
+
+        super(Fs, self).__init__(
+            "fileselector", ELM_WIN_DIALOG_BASIC, title="Select file",
+            size=(400 * SCALE, 400 * SCALE), autodel=True)
+
+        bg = Background(self, size_hint_weight=EXPAND_BOTH)
+        self.resize_object_add(bg)
+        bg.show()
+
+        fs = Fileselector(
+            self, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH,
+            is_save=False, expandable=False, path=os.path.expanduser("~"))
+        self.resize_object_add(fs)
+        fs.mime_types_filter_append(["application/pdf", ], "pdf")
+        fs.mime_types_filter_append(["*", ], "all")
+        fs.callback_done_add(lambda x, y: done_cb(y))
+        fs.callback_done_add(lambda x, y: self.delete())
+        fs.show()
+        self.show()
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Presenter of writings")
     parser.add_argument(
-        'documents', metavar='pdf', type=str, nargs='+',
+        'documents', metavar='pdf', type=str, nargs='*',
         help='documents you may want to display')
     args = parser.parse_args()
 
@@ -413,12 +456,14 @@ if __name__ == "__main__":
         except Exception:
             log.info("document positions could not be restored")
 
-    app = AppWindow()
+    app = AppWindow(doc_specs)
 
     docs = []
 
     for doc_path in args.documents:
-        app.document_open(doc_path, *doc_specs.get(doc_path, (None, None)))
+        app.document_open(doc_path)
+
+    app.show()
 
     elm.run()
 
