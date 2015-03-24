@@ -49,7 +49,7 @@ class Tabs(Box):
     tab,deleted
         A tab was deleted (event info is the tabs content)
 
-        You should delete the tab content if you no longer need it
+        The tab and its contents are deleted immediately after this event
 
     tabs,add,clicked
         The Add tab -button was clicked
@@ -89,6 +89,7 @@ class Tabs(Box):
         # Contents
         nf = self._nf = Naviframe(
             self, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
+        nf.callback_transition_finished_add(self._nfit_shown)
         nf.show()
 
         self.pack_end(scr)
@@ -121,28 +122,16 @@ class Tabs(Box):
         if current is not None:
             self._dict[current].selected = False
 
-        self._nf.item_simple_push(content)
+        it = self._nf.item_simple_push(content)
+        it.pop_cb_set(self._nfit_popping)
 
         tab.selected = True
 
         self.callback_call("tab,added", content)
 
     def __delitem__(self, content):
-        tab = self._dict[content]
-        tab._delete()
-        prev = None
-        for it in self._nf.items:
-            if it.content is content:
-                if self.currentContent is content:
-                    if prev:
-                        self.showTab(prev.content)
-                it.delete()
-                break
-            prev = it
-        OrderedDict.__delitem__(self._dict, content)
-        self.callback_call("tab,deleted", content)
-        if len(self) == 0:
-            self.callback_call("tabs,empty")
+        self._nf.item_simple_promote(content)
+        self._nf.item_pop()
 
     def __iter__(self):
         return OrderedDict.__iter__(self._dict)
@@ -174,14 +163,24 @@ class Tabs(Box):
         if content is current:
             return
 
-        if current is not None:
-            self[current].selected = False
-
         self._nf.item_simple_promote(content)
 
-        self[content].selected = True
+    def _nfit_shown(self, nf, it):
+        for item in nf.items:
+            if item is not it:
+                self[item.content].selected = False
 
-        self.callback_call("tab,selected", content)
+        self[it.content].selected = True
+        self.callback_call("tab,selected", it.content)
+
+    def _nfit_popping(self, it):
+        tab = self._dict[it.content]
+        tab._delete()
+        OrderedDict.__delitem__(self._dict, it.content)
+        self.callback_call("tab,deleted", it.content)
+        if len(self) == 0:
+            self.callback_call("tabs,empty")
+        return True
 
 
 class Tab(object):
@@ -199,7 +198,9 @@ class Tab(object):
         self._sep = None
 
     def __repr__(self):
-        return "<%s(name=%r, content=%r, canClose=%r, canSelect=%r)>" % (self.__class__.__name__, self._name, self.content, self.canClose, self.canSelect)
+        return "<%s(name=%r, content=%r, canClose=%r, canSelect=%r)>" % (
+            self.__class__.__name__, self._name, self.content.__name__,
+            self.canClose, self.canSelect)
 
     def _initialize(self, parent_widget, show_func, del_func):
         sel_btn = self._sel_btn = Button(
