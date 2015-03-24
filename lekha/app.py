@@ -125,11 +125,11 @@ class AppWindow(StandardWindow):
         t1 = self.t1 = time.clock()
         try:
             doc = PyPDF2.PdfFileReader(doc_path)
+            page_count = doc.trailer["/Root"]["/Pages"]["/Count"]
             info = doc.getDocumentInfo()
         except Exception as e:
             log.exception("Document could not be opened because: %r" % e)
             return
-        doc._flatten()
         t2 = time.clock()
 
         log.info("%s %s %s %s %s", info.title, info.author, info.subject, info.creator, info.producer)
@@ -141,21 +141,26 @@ class AppWindow(StandardWindow):
         else:
             doc_title = doc_path
 
-        content = Document(self, doc_title, doc_path, doc_zoom, doc_pos)
+        content = Document(self, doc_title, doc_path, page_count, doc_zoom, doc_pos)
         self.docs.append(content)
         self.tabs.append(Tab(doc_title, content))
 
-        idler = Idler(content.populate_page, enumerate(doc.pages, start=0))
+        try:
+            itr = iter(xrange(page_count))
+        except Exception:
+            itr = iter(range(page_count))
+        idler = Idler(content.populate_page, doc, itr)
         self.callback_delete_request_add(lambda x: idler.delete())
 
 
 class Document(Box):
 
-    def __init__(self, parent, doc_title, doc_path, doc_zoom=1.0, doc_pos=None):
-        self.doc_title = doc_title
-        self.doc_path = doc_path
-        self._zoom = doc_zoom
-        self.doc_pos = doc_pos
+    def __init__(self, parent, title, path, page_count, zoom=1.0, pos=None):
+        self.doc_title = title
+        self.doc_path = path
+        self._zoom = zoom
+        self.doc_pos = pos
+        self.page_count = page_count
         self.pages = []
 
         super(Document, self).__init__(parent, size_hint_weight=EXPAND_BOTH, align=(0.5, 0.0))
@@ -174,6 +179,8 @@ class Document(Box):
 
         spn = self.spn = Spinner(toolbox, round=1.0)
         spn.special_value_add(1, "First")
+        spn.special_value_add(page_count, "Last")
+        spn.min_max = (1, page_count)
         toolbox.pack_end(spn)
 
         btn = Button(toolbox, text="show page")
@@ -204,13 +211,13 @@ class Document(Box):
 
         self.show()
 
-    def populate_page(self, itr):
+    def populate_page(self, doc, itr):
         try:
-            pg_num, pg = next(itr)
+            pg_num = next(itr)
+            pg = doc.getPage(pg_num)
         except StopIteration:
             self.load_notify.content.pulse(False)
             self.load_notify.hide()
-            self.spn.special_value_add(len(self.pages), "Last")
             if self.doc_pos is not None:
                 self.scr.region_show(*self.doc_pos)
             return False
@@ -227,8 +234,6 @@ class Document(Box):
         page.show()
 
         self.pages.append((pg.indirectRef.idnum, page))
-
-        self.spn.min_max = (1, len(self.pages))
 
         return True
 
@@ -317,16 +322,15 @@ class PageSmart(Smart):
         pv_img = obj.pv_img
 
         if r1.intersects(r2):
-            if obj.in_viewport:
+            if obj.in_viewport is True:
                 return
             obj.in_viewport = True
             obj.callback_call("viewport,in")
-            for img in (pv_img,):
-                img.file = (obj.doc_path, str(obj.page_num))
-                img.preload()
+            pv_img.file = (obj.doc_path, str(obj.page_num))
+            pv_img.preload()
             log.debug("preloading pv %d %r %r", obj.page_num, r1, r2)
         else:
-            if not obj.in_viewport:
+            if obj.in_viewport is False:
                 return
             obj.in_viewport = False
             obj.callback_call("viewport,out")
@@ -387,21 +391,21 @@ class Page(SmartObject):
         self.member_add(self.bg)
         self.bg.show()
 
-        self.pv_img = FilledImage(evas, load_dpi=1, load_size=(w/2, h/2))
-        self.member_add(self.pv_img)
-
-        self.pv_img.on_image_preloaded_add(self.pv_preloaded)
-
-        self.hq_img = FilledImage(evas, load_dpi=1, load_size=(w*4, h*4))
-        self.member_add(self.hq_img)
-
-        self.hq_img.on_image_preloaded_add(self.hq_preloaded, self.pv_img)
-
         self.orig_w = float(w)
         self.orig_h = float(h)
 
         w = float(w) * zoom
         h = float(h) * zoom
+
+        self.pv_img = FilledImage(evas, load_dpi=1, load_size=(w/2, h/2))
+        self.member_add(self.pv_img)
+
+        self.pv_img.on_image_preloaded_add(self.pv_preloaded)
+
+        self.hq_img = FilledImage(evas, load_dpi=1, load_size=(w*2, h*2))
+        self.member_add(self.hq_img)
+
+        self.hq_img.on_image_preloaded_add(self.hq_preloaded, self.pv_img)
 
         self.size_hint_min = w, h
 
@@ -409,13 +413,15 @@ class Page(SmartObject):
 
     def zoom_set(self, value):
         old_size = self.size_hint_min
-        new_size = [i * value for i in (self.orig_w, self.orig_h)]
+        new_size = [(i * value) for i in (self.orig_w, self.orig_h)]
         if (
                 (old_size[0] >= self.SIZE_MIN or
                  old_size[1] >= self.SIZE_MIN) and
                 (new_size[0] < self.SIZE_MIN or
                  new_size[1] < self.SIZE_MIN)):
             return
+        self.pv_img.load_size = [(i * value / 2) for i in (self.orig_w, self.orig_h)]
+        self.hq_img.load_size = [(i * value * 2) for i in (self.orig_w, self.orig_h)]
         self.size_hint_min = new_size
 
     def hq_preloaded(self, hq_img, pv_img):
