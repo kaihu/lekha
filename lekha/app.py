@@ -304,8 +304,9 @@ class Document(Box):
         pg_id, pg = self.pages[pg_num]
         x1, y1, w1, h1 = self.scr.region
         x2, y2, w2, h2 = pg.geometry
-        new_x = x1 + x2
-        new_y = y1 + y2
+        x3, y3 = self.scr.pos
+        new_x = x1 + x2 - y3
+        new_y = y1 + y2 - y3
         self.scr.region_show(new_x, new_y, 0, h1)
 
     def _scrolled(self, scr):
