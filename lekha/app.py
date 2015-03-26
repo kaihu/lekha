@@ -33,6 +33,9 @@ from efl.evas import Smart, SmartObject, FilledImage, EXPAND_BOTH, FILL_BOTH, \
     EVAS_CALLBACK_KEY_DOWN, EVAS_CALLBACK_KEY_UP, EVAS_CALLBACK_MOUSE_WHEEL, \
     Rect, Rectangle, EXPAND_HORIZ, FILL_HORIZ
 
+ALIGN_LEFT = 0.0, 0.5
+ALIGN_RIGHT = 1.0, 0.5
+
 import efl.elementary as elm
 from efl.elementary import ELM_POLICY_QUIT, ELM_POLICY_QUIT_LAST_WINDOW_CLOSED
 from efl.elementary.configuration import Configuration
@@ -48,6 +51,13 @@ from efl.elementary.progressbar import Progressbar
 from efl.elementary.toolbar import Toolbar, ELM_OBJECT_SELECT_MODE_NONE
 from efl.elementary.fileselector import Fileselector
 from efl.elementary.background import Background
+from efl.elementary.table import Table
+from efl.elementary.entry import Entry
+from efl.elementary.panel import Panel, ELM_PANEL_ORIENT_LEFT
+from efl.elementary.genlist import Genlist, GenlistItem, GenlistItemClass, \
+    ELM_GENLIST_ITEM_TREE, ELM_GENLIST_ITEM_NONE, ELM_LIST_COMPRESS, \
+    ELM_OBJECT_SELECT_MODE_ALWAYS
+from efl.elementary.menu import Menu
 
 import PyPDF2
 
@@ -79,28 +89,15 @@ class AppWindow(StandardWindow):
         tb.item_append(
             "document-open", "Open", lambda x, y: Fs(self.document_open))
 
-        it = tb.item_append("zoom-in", "Zoom")
-        it.menu = True
-        tb.menu_parent = self
-        menu = it.menu
-        menu.item_add(
-            None, "Zoom In", "zoom-in",
-            lambda x, y: tabs.currentContent.zoom_in())
-        menu.item_add(
-            None, "Zoom Out", "zoom-out",
-            lambda x, y: tabs.currentContent.zoom_out())
-        menu.item_add(
-            None, "Zoom 1:1", "zoom-original",
-            lambda x, y: tabs.currentContent.zoom_orig())
-        menu.item_add(
-            None, "Zoom Fit", "zoom-fit-best",
-            lambda x, y: tabs.currentContent.zoom_fit())
+        tabs = self.tabs = Tabs(
+            main_box, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
 
-        tabs = self.tabs = Tabs(main_box, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
-
-        tabs.callback_add("tab,added", lambda x, y: self.title_set(y.doc_title))
-        tabs.callback_add("tab,selected", lambda x, y: self.title_set(y.doc_title))
-        tabs.callback_add("tab,deleted", lambda x, y: y.delete())
+        tabs.callback_add(
+            "tab,added", lambda x, y: self.title_set(y.doc_title))
+        tabs.callback_add(
+            "tab,selected", lambda x, y: self.title_set(y.doc_title))
+        tabs.callback_add(
+            "tab,deleted", lambda x, y: y.delete())
 
         main_box.pack_end(tb)
         main_box.pack_end(tabs)
@@ -118,21 +115,25 @@ class AppWindow(StandardWindow):
             assert isinstance(doc_pos, list), "pos is not tuple"
             assert len(doc_pos) == 4, "pos len is not 4"
         except Exception as e:
-            log.info("document zoom and position could not be restored because: %r", e)
+            log.info(
+                "document zoom and position could not be restored because: %r",
+                e)
             doc_pos = (0, 0, 0, 0)
             doc_zoom = 1.0
 
         t1 = self.t1 = time.clock()
         try:
             doc = PyPDF2.PdfFileReader(doc_path)
-            page_count = doc.trailer["/Root"]["/Pages"]["/Count"]
+            page_count = int(doc.trailer["/Root"]["/Pages"]["/Count"])
             info = doc.getDocumentInfo()
         except Exception as e:
             log.exception("Document could not be opened because: %r" % e)
             return
         t2 = time.clock()
 
-        log.info("%s %s %s %s %s", info.title, info.author, info.subject, info.creator, info.producer)
+        log.info(
+            "%s %s %s %s %s",
+            info.title, info.author, info.subject, info.creator, info.producer)
 
         log.info("Reading the doc took: %f", t2-t1)
 
@@ -141,7 +142,8 @@ class AppWindow(StandardWindow):
         else:
             doc_title = doc_path
 
-        content = Document(self, doc_title, doc_path, page_count, doc_zoom, doc_pos)
+        content = Document(
+            self, doc_title, doc_path, page_count, doc_zoom, doc_pos, doc.outlines)
         self.docs.append(content)
         self.tabs.append(Tab(doc_title, content))
 
@@ -153,9 +155,22 @@ class AppWindow(StandardWindow):
         self.callback_delete_request_add(lambda x: idler.delete())
 
 
-class Document(Box):
+class OutLine(GenlistItemClass):
+    def text_get(self, gl, part, ol):
+        return ol.title
 
-    def __init__(self, parent, title, path, page_count, zoom=1.0, pos=None):
+ol_glic = OutLine(item_style="no_icon")
+
+
+class OutLineList(GenlistItemClass):
+    def text_get(self, gl, part, ol):
+        return
+
+oll_glic = OutLineList(item_style="no_icon")
+
+class Document(Table):
+
+    def __init__(self, parent, title, path, page_count, zoom=1.0, pos=None, outlines=[]):
         self.doc_title = title
         self.doc_path = path
         self._zoom = zoom
@@ -163,41 +178,77 @@ class Document(Box):
         self.page_count = page_count
         self.pages = []
 
-        super(Document, self).__init__(parent, size_hint_weight=EXPAND_BOTH, align=(0.5, 0.0))
+        super(Document, self).__init__(
+            parent, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
 
-        scr = self.scr = Scroller(self, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
+
+        scr = self.scr = Scroller(
+            self, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
         scr.callback_scroll_add(self._scrolled)
-        self.pack_end(scr)
+        self.pack(scr, 0, 0, 1, 1)
+        scr.show()
 
-        box = self.page_box = Box(scr, size_hint_weight=EXPAND_BOTH, size_hint_align=(0.5, 0.0))
+        box = self.page_box = Box(
+            scr, size_hint_weight=EXPAND_BOTH, size_hint_align=(0.5, 0.0))
         scr.content = box
 
         self.elm_event_callback_add(self._event_handler)
         self.on_resize_add(self._resized)
 
-        toolbox = Box(self, horizontal=True, size_hint_weight=EXPAND_HORIZ)
+        toolbox = Table(
+            self, size_hint_weight=EXPAND_HORIZ, size_hint_align=FILL_HORIZ)
 
-        spn = self.spn = Spinner(toolbox, round=1.0)
+        btn = Button(
+            toolbox, text="Toggle outlines", size_hint_align=ALIGN_LEFT)
+        btn.callback_clicked_add(lambda x: self.ol_p.toggle())
+        toolbox.pack(btn, 0, 0, 1, 1)
+        btn.show()
+
+        spn = self.spn = Spinner(
+            toolbox, round=1.0,
+            size_hint_weight=EXPAND_HORIZ, size_hint_align=FILL_HORIZ)
         spn.special_value_add(1, "First")
         spn.special_value_add(page_count, "Last")
         spn.min_max = (1, page_count)
-        toolbox.pack_end(spn)
+        spn.editable = True
+        toolbox.pack(spn, 1, 0, 1, 1)
+        spn.show()
 
-        btn = Button(toolbox, text="show page")
+        btn = Button(
+            toolbox, text="show page",
+            size_hint_weight=EXPAND_HORIZ, size_hint_align=ALIGN_LEFT)
         btn.callback_clicked_add(self._show_page_cb, spn)
-        toolbox.pack_end(btn)
+        toolbox.pack(btn, 2, 0, 1, 1)
+        btn.show()
 
-        zlbl = self.zlbl = Label(
-            toolbox, text="%1.0f %%" % (self.zoom * 100.0))
-        toolbox.pack_end(zlbl)
+        menu = Menu(self.top_widget)
+        menu.item_add(
+            None, "Zoom In", "zoom-in",
+            lambda x, y: self.zoom_in())
+        menu.item_add(
+            None, "Zoom Out", "zoom-out",
+            lambda x, y: self.zoom_out())
+        menu.item_add(
+            None, "Zoom 1:1", "zoom-original",
+            lambda x, y: self.zoom_orig())
+        menu.item_add(
+            None, "Zoom Fit", "zoom-fit-best",
+            lambda x, y: self.zoom_fit())
 
-        for c in toolbox:
-            c.show()
+        def z_clicked(btn):
+            x, y = btn.evas.pointer_canvas_xy_get()
+            menu.move(x, y)
+            menu.show()
 
-        self.pack_end(toolbox)
+        zlbl = self.zlbl = Button(
+            toolbox, text="%1.0f %%" % (self.zoom * 100.0),
+            size_hint_weight=EXPAND_HORIZ, size_hint_align=ALIGN_RIGHT)
+        zlbl.callback_clicked_add(z_clicked)
+        toolbox.pack(zlbl, 3, 0, 1, 1)
+        zlbl.show()
 
-        for c in self:
-            c.show()
+        self.pack(toolbox, 0, 1, 1, 1)
+        toolbox.show()
 
         n = self.page_notify = Notify(scr, align=(0.02, 0.02))
         b = Box(n, horizontal=True, padding=(6, 0))
@@ -209,7 +260,52 @@ class Document(Box):
         pb.pulse(True)
         n.show()
 
+        p = self.ol_p = Panel(
+            self, orient=ELM_PANEL_ORIENT_LEFT, hidden=True,
+            size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH,
+            scrollable=True, scrollable_content_size=0.35)
+        self.pack(p, 0, 0, 1, 1)
+        p.show()
+
+        ol_gl = self.ol_gl = Genlist(
+            p, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH,
+            mode=ELM_LIST_COMPRESS, homogeneous=True,
+            select_mode=ELM_OBJECT_SELECT_MODE_ALWAYS
+            )
+        p.content = ol_gl
+
+        for outline in outlines:
+            if isinstance(outline, list):
+                GenlistItem(oll_glic, outline, None, ELM_GENLIST_ITEM_TREE).append_to(ol_gl)
+            else:
+                GenlistItem(ol_glic, outline, None, ELM_GENLIST_ITEM_NONE, self._outline_clicked_cb, outline).append_to(ol_gl)
+
+        ol_gl.callback_contract_request_add(self._gl_contract_req)
+        ol_gl.callback_contracted_add(self._gl_contracted)
+        ol_gl.callback_expand_request_add(self._gl_expand_req)
+        ol_gl.callback_expanded_add(self._gl_expanded)
+        ol_gl.show()
+
         self.show()
+
+    @staticmethod
+    def _gl_contract_req(gl, it):
+        it.expanded = False
+
+    @staticmethod
+    def _gl_contracted(gl, it):
+        it.subitems_clear()
+
+    @staticmethod
+    def _gl_expand_req(gl, it):
+        it.expanded = True
+
+    def _gl_expanded(self, gl, it):
+        for outline in it.data:
+            if isinstance(outline, list):
+                GenlistItem(oll_glic, outline, it, ELM_GENLIST_ITEM_TREE).append_to(gl)
+            else:
+                GenlistItem(ol_glic, outline, it, ELM_GENLIST_ITEM_NONE, self._outline_clicked_cb, outline).append_to(gl)
 
     def populate_page(self, doc, itr):
         try:
@@ -220,6 +316,7 @@ class Document(Box):
             self.load_notify.hide()
             if self.doc_pos is not None:
                 self.scr.region_show(*self.doc_pos)
+
             return False
 
         mbox = pg.mediaBox
@@ -298,15 +395,38 @@ class Document(Box):
 
     def _show_page_cb(self, btn, spn):
         pg_num = int(round(spn.value))-1
-        self.page_show(pg_num)
+        self.page_show_by_num(pg_num)
 
-    def page_show(self, pg_num):
+    def _outline_clicked_cb(self, glit, gl, ol):
+        if ol.typ == "/Fit":
+            self.page_show_by_id(ol.page.idnum)
+        elif ol.typ == "/XYZ":
+            self.page_show_by_id(ol.page.idnum, ol.left, ol.top)
+        else:
+            self.page_show_by_id(ol.page.idnum)
+        # /FitH      [top]
+        # /FitV      [left]
+        # /FitR      [left] [bottom] [right] [top]
+        # /FitB      No additional arguments
+        # /FitBH     [top]
+        # /FitBV     [left]
+
+    def page_show_by_id(self, page_id, offset_x=0, offset_y=0):
+        for id_num, pg in self.pages:
+            if page_id == id_num:
+                self.page_show(pg, offset_x, offset_y)
+                break
+
+    def page_show_by_num(self, pg_num):
         pg_id, pg = self.pages[pg_num]
+        self.page_show(pg)
+
+    def page_show(self, pg, offset_x=0, offset_y=0):
         x1, y1, w1, h1 = self.scr.region
         x2, y2, w2, h2 = pg.geometry
         x3, y3 = self.scr.pos
-        new_x = x1 + x2 - y3
-        new_y = y1 + y2 - y3
+        new_x = x1 + x2 - x3 + offset_x
+        new_y = y1 + y2 - y3 + offset_y
         self.scr.region_show(new_x, new_y, 0, h1)
 
     def _scrolled(self, scr):
@@ -318,7 +438,7 @@ class PageSmart(Smart):
     @staticmethod
     def check_visibility(obj, x, y, w, h):
         r1 = Rect(x, y, w, h)
-        r2 = obj.evas.rect
+        r2 = obj.parent.parent.rect
         hq_img = obj.hq_img
         pv_img = obj.pv_img
 
@@ -421,8 +541,12 @@ class Page(SmartObject):
                 (new_size[0] < self.SIZE_MIN or
                  new_size[1] < self.SIZE_MIN)):
             return
-        self.pv_img.load_size = [(i * value / 2) for i in (self.orig_w, self.orig_h)]
-        self.hq_img.load_size = [(i * value * 2) for i in (self.orig_w, self.orig_h)]
+        self.pv_img.load_size = [
+            (i * value / 2) for i in (self.orig_w, self.orig_h)
+            ]
+        self.hq_img.load_size = [
+            (i * value * 2) for i in (self.orig_w, self.orig_h)
+            ]
         self.size_hint_min = new_size
 
     def hq_preloaded(self, hq_img, pv_img):
