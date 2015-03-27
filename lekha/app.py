@@ -366,7 +366,14 @@ class Document(Table):
             if pw > widest:
                 widest = pw
 
+        if widest == 0:
+            log.error("Widest page has width of 0!")
+            return
+
+        widest += 1  # won't trigger scrolling because of rounding error.
+
         viewport_width = self.scr.region[2]
+
         self.zoom *= viewport_width/widest
 
     def _event_handler(self, obj, src, tp, ev):
@@ -604,7 +611,7 @@ if __name__ == "__main__":
 
     log = logging.getLogger("lekha")
     log.addHandler(handler)
-    log.setLevel(logging.DEBUG)
+    log.setLevel(logging.WARN)
 
     evas.init()
     elm.init()
