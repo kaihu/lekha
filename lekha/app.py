@@ -25,8 +25,9 @@ import logging
 import argparse
 import json
 import os
+from threading import Thread
 
-from efl.ecore import Idler
+from efl.ecore import Idler, Timer
 
 import efl.evas as evas
 from efl.evas import Smart, SmartObject, FilledImage, EXPAND_BOTH, FILL_BOTH, \
@@ -94,8 +95,8 @@ class AppWindow(StandardWindow):
         tabs = self.tabs = Tabs(
             main_box, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
 
-        tabs.callback_add(
-            "tab,added", lambda x, y: self.title_set(y.doc_title))
+        # tabs.callback_add(
+        #     "tab,added", lambda x, y: self.title_set(y.doc_title))
         tabs.callback_add(
             "tab,selected", lambda x, y: self.title_set(y.doc_title))
         tabs.callback_add(
@@ -141,55 +142,31 @@ class AppWindow(StandardWindow):
     def document_open(self, doc_path):
         if not doc_path:
             return
-        doc_zoom, doc_pos = self.doc_specs.get(doc_path, [None, None])
-        try:
-            assert isinstance(doc_zoom, float), "zoom is not float"
-            assert isinstance(doc_pos, list), "pos is not tuple"
-            assert len(doc_pos) == 4, "pos len is not 4"
-        except Exception as e:
-            log.info(
-                "document zoom and position could not be restored because: %r",
-                e)
-            doc_pos = (0, 0, 0, 0)
+
+        if doc_path in self.doc_specs:
+            doc_zoom, doc_pos = self.doc_specs[doc_path]
+            try:
+                assert isinstance(doc_zoom, float), "zoom is not float"
+                assert isinstance(doc_pos, list), "pos is not tuple"
+                assert len(doc_pos) == 4, "pos len is not 4"
+            except Exception as e:
+                log.warn(
+                    "document zoom and position could not be restored because: %r",
+                    e)
+                doc_pos = [0, 0, 0, 0]
+                doc_zoom = 1.0
+        else:
+            doc_pos = [0, 0, 0, 0]
             doc_zoom = 1.0
 
-        t1 = self.t1 = time.clock()
-        try:
-            doc = PyPDF2.PdfFileReader(doc_path)
-            page_count = int(doc.trailer["/Root"]["/Pages"]["/Count"])
-            info = doc.getDocumentInfo()
-        except Exception as e:
-            log.exception("Document could not be opened because: %r" % e)
-            return
-        t2 = time.clock()
+        doc = Document(self, doc_path, doc_pos, doc_zoom)
+        self.docs.append(doc)
+        tab = Tab("Untitled", doc)
 
-        log.info(
-            "%s %s %s %s %s",
-            info.title, info.author, info.subject, info.creator, info.producer)
-
-        log.debug("Reading the doc took: %f", t2-t1)
-
-        if info.title:
-            doc_title = "{0}".format(info.title)
-        else:
-            doc_title = doc_path
-
-        t1 = time.clock()
-        outlines = doc.outlines
-        t2 = time.clock()
-        log.debug("Fetching outlines took: %f", t2-t1)
-
-        content = Document(
-            self, doc_title, doc_path, page_count, doc_zoom, doc_pos, outlines)
-        self.docs.append(content)
-        self.tabs.append(Tab(doc_title, content))
-
-        try:
-            itr = iter(xrange(page_count))
-        except Exception:
-            itr = iter(range(page_count))
-        idler = Idler(content.populate_page, doc, itr)
-        self.callback_delete_request_add(lambda x: idler.delete())
+        def title_changed(doc, title):
+            tab.name = title
+        doc.callback_add("title,changed", title_changed)
+        self.tabs.append(tab)
 
 
 class OutLine(GenlistItemClass):
@@ -210,13 +187,19 @@ oll_glic = OutLineList(item_style="no_icon")
 
 class Document(Table):
 
-    def __init__(self, parent, title, path, page_count, zoom=1.0, pos=None, outlines=[]):
-        self.doc_title = title
+    """
+
+    Custom smart events:
+
+    - title,changed
+    """
+
+    def __init__(self, parent, path, pos=None, zoom=1.0):
         self.doc_path = path
         self._zoom = zoom
         self.doc_pos = pos
-        self.page_count = page_count
         self.pages = []
+        self.doc = None
 
         super(Document, self).__init__(
             parent, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
@@ -246,8 +229,6 @@ class Document(Table):
             toolbox, round=1.0,
             size_hint_weight=EXPAND_HORIZ, size_hint_align=FILL_HORIZ)
         spn.special_value_add(1, "First")
-        spn.special_value_add(page_count, "Last")
-        spn.min_max = (1, page_count)
         spn.editable = True
         toolbox.pack(spn, 1, 0, 1, 1)
         spn.show()
@@ -312,16 +293,6 @@ class Document(Table):
             )
         p.content = ol_gl
 
-        t1 = time.clock()
-        for outline in outlines:
-            if isinstance(outline, list):
-                GenlistItem(oll_glic, outline, None, ELM_GENLIST_ITEM_TREE).append_to(ol_gl)
-            else:
-                GenlistItem(ol_glic, outline, None, ELM_GENLIST_ITEM_NONE, self._outline_clicked_cb, outline).append_to(ol_gl)
-
-        t2 = time.clock()
-        log.debug("Populating outlines took: %f", t2-t1)
-
         ol_gl.callback_contract_request_add(self._gl_contract_req)
         ol_gl.callback_contracted_add(self._gl_contracted)
         ol_gl.callback_expand_request_add(self._gl_expand_req)
@@ -329,6 +300,62 @@ class Document(Table):
         ol_gl.show()
 
         self.show()
+
+        def read_worker():
+            t1 = self.t1 = time.clock()
+            try:
+                self.doc = PyPDF2.PdfFileReader(path)
+                self.page_count = self.doc.getNumPages()
+            except Exception as e:
+                log.exception("Document could not be opened because: %r" % e)
+                return
+            t2 = time.clock()
+            log.info("Reading the doc took: %f", t2-t1)
+
+        t = Thread(target=read_worker, daemon=True)
+        t.start()
+
+        def worker_check(t):
+            if t.is_alive():
+                return True
+            if self.doc:
+                spn.special_value_add(self.page_count, "Last")
+                spn.min_max = (1, self.page_count)
+                info = self.doc.getDocumentInfo()
+
+                log.info(
+                    "%s %s %s %s %s",
+                    info.title, info.author, info.subject, info.creator, info.producer)
+
+                if info.title:
+                    self.doc_title = "{0}".format(info.title)
+                else:
+                    self.doc_title = doc_path
+                self.callback_call("title,changed", self.doc_title)
+
+                self.populate_pages()
+            else:
+                pass  # TODO: Notify of error
+
+        timer = Timer(0.2, worker_check, t)
+        self.parent.callback_delete_request_add(lambda x: timer.delete())
+
+    def populate_pages(self):
+        # page_count = int(doc.trailer["/Root"]["/Pages"]["/Count"])
+
+        try:
+            itr = iter(xrange(self.page_count))
+        except Exception:
+            itr = iter(range(self.page_count))
+        idler = Idler(self.populate_page, self.doc, itr)
+        self.parent.callback_delete_request_add(lambda x: idler.delete())
+
+    def outlines_populate(self, outlines, parent=None):
+        for outline in outlines:
+            if isinstance(outline, list):
+                GenlistItem(oll_glic, outline, None, ELM_GENLIST_ITEM_TREE).append_to(self.ol_gl)
+            else:
+                GenlistItem(ol_glic, outline, None, ELM_GENLIST_ITEM_NONE, self._outline_clicked_cb, outline).append_to(self.ol_gl)
 
     @staticmethod
     def _gl_contract_req(gl, it):
@@ -343,21 +370,33 @@ class Document(Table):
         it.expanded = True
 
     def _gl_expanded(self, gl, it):
-        for outline in it.data:
-            if isinstance(outline, list):
-                GenlistItem(oll_glic, outline, it, ELM_GENLIST_ITEM_TREE).append_to(gl)
-            else:
-                GenlistItem(ol_glic, outline, it, ELM_GENLIST_ITEM_NONE, self._outline_clicked_cb, outline).append_to(gl)
+        self.outlines_populate(it.data, it)
 
     def populate_page(self, doc, itr):
         try:
             pg_num = next(itr)
             pg = doc.getPage(pg_num)
         except StopIteration:
-            self.load_notify.content.pulse(False)
-            self.load_notify.hide()
             if self.doc_pos is not None:
                 self.scr.region_show(*self.doc_pos)
+
+            def outlines_get():
+                self.outlines = doc.outlines
+
+            t1 = time.clock()
+            t = Thread(target=outlines_get, daemon=True)
+            t.start()
+
+            def check_outlines(t):
+                if t.is_alive():
+                    return True
+                t2 = time.clock()
+                log.info("Fetching outlines took: %f", t2-t1)
+                self.outlines_populate(self.outlines)
+                self.load_notify.content.pulse(False)
+                self.load_notify.hide()
+
+            self.outlines_timer = Timer(0.2, check_outlines, t)
 
             return False
 
