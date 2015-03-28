@@ -361,9 +361,9 @@ class Document(Table):
     def outlines_populate(self, outlines, parent=None):
         for outline in outlines:
             if isinstance(outline, list):
-                GenlistItem(oll_glic, outline, None, ELM_GENLIST_ITEM_TREE).append_to(self.ol_gl)
+                GenlistItem(oll_glic, outline, parent, ELM_GENLIST_ITEM_TREE).append_to(self.ol_gl)
             else:
-                GenlistItem(ol_glic, outline, None, ELM_GENLIST_ITEM_NONE, self._outline_clicked_cb, outline).append_to(self.ol_gl)
+                GenlistItem(ol_glic, outline, parent, ELM_GENLIST_ITEM_NONE, self._outline_clicked_cb, outline).append_to(self.ol_gl)
 
     @staticmethod
     def _gl_contract_req(gl, it):
