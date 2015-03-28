@@ -31,7 +31,7 @@ from efl.ecore import Idler
 import efl.evas as evas
 from efl.evas import Smart, SmartObject, FilledImage, EXPAND_BOTH, FILL_BOTH, \
     EVAS_CALLBACK_KEY_DOWN, EVAS_CALLBACK_KEY_UP, EVAS_CALLBACK_MOUSE_WHEEL, \
-    Rect, Rectangle, EXPAND_HORIZ, FILL_HORIZ
+    Rect, Rectangle, EXPAND_HORIZ, FILL_HORIZ, EVAS_EVENT_FLAG_ON_HOLD
 
 ALIGN_LEFT = 0.0, 0.5
 ALIGN_RIGHT = 1.0, 0.5
@@ -79,15 +79,17 @@ class AppWindow(StandardWindow):
             size=(400 * SCALE, 400 * SCALE),
             autodel=True)
 
-        main_box = Box(self, size_hint_weight=EXPAND_BOTH)
+        main_box = self.main_box = Box(self, size_hint_weight=EXPAND_BOTH)
         self.resize_object_add(main_box)
 
-        tb = Toolbar(
+        tb = self.tb = Toolbar(
             self,  # For some reason item menus break when parent is main_box
             size_hint_weight=EXPAND_HORIZ, size_hint_align=FILL_HORIZ,
             select_mode=ELM_OBJECT_SELECT_MODE_NONE, icon_size=24)
         tb.item_append(
             "document-open", "Open", lambda x, y: Fs(self.document_open))
+        tb.item_append(
+            "view-fullscreen", "Fullscreen", lambda x, y: self.fullscreen_set(True))
 
         tabs = self.tabs = Tabs(
             main_box, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
@@ -104,7 +106,37 @@ class AppWindow(StandardWindow):
         tb.show()
         tabs.show()
 
+        self.callback_fullscreen_add(self._fullscreen_cb)
+        self.callback_unfullscreen_add(self._unfullscreen_cb)
+        self.elm_event_callback_add(self._event_handler)
+
         main_box.show()
+
+    def _event_handler(self, obj, src, tp, ev):
+        if tp == EVAS_CALLBACK_KEY_UP:
+            key = ev.key
+            if key == "plus":
+                self.tabs.currentContent.zoom_in()
+            elif key == "minus":
+                self.tabs.currentContent.zoom_out()
+            elif key == "Escape":
+                if self.fullscreen:
+                    self.fullscreen = False
+            elif key == "F11":
+                self.fullscreen = not self.fullscreen
+            ev.event_flags |= EVAS_EVENT_FLAG_ON_HOLD
+
+    @staticmethod
+    def _fullscreen_cb(win):
+        win.tabs.hide_tabs()
+        win.main_box.unpack(win.tb)
+        win.tb.hide()
+
+    @staticmethod
+    def _unfullscreen_cb(win):
+        win.tabs.show_tabs()
+        win.main_box.pack_start(win.tb)
+        win.tb.show()
 
     def document_open(self, doc_path):
         if not doc_path:
@@ -135,15 +167,20 @@ class AppWindow(StandardWindow):
             "%s %s %s %s %s",
             info.title, info.author, info.subject, info.creator, info.producer)
 
-        log.info("Reading the doc took: %f", t2-t1)
+        log.debug("Reading the doc took: %f", t2-t1)
 
         if info.title:
             doc_title = "{0}".format(info.title)
         else:
             doc_title = doc_path
 
+        t1 = time.clock()
+        outlines = doc.outlines
+        t2 = time.clock()
+        log.debug("Fetching outlines took: %f", t2-t1)
+
         content = Document(
-            self, doc_title, doc_path, page_count, doc_zoom, doc_pos, doc.outlines)
+            self, doc_title, doc_path, page_count, doc_zoom, doc_pos, outlines)
         self.docs.append(content)
         self.tabs.append(Tab(doc_title, content))
 
@@ -156,6 +193,7 @@ class AppWindow(StandardWindow):
 
 
 class OutLine(GenlistItemClass):
+
     def text_get(self, gl, part, ol):
         return ol.title
 
@@ -163,10 +201,12 @@ ol_glic = OutLine(item_style="no_icon")
 
 
 class OutLineList(GenlistItemClass):
+
     def text_get(self, gl, part, ol):
         return
 
 oll_glic = OutLineList(item_style="no_icon")
+
 
 class Document(Table):
 
@@ -181,7 +221,6 @@ class Document(Table):
         super(Document, self).__init__(
             parent, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
 
-
         scr = self.scr = Scroller(
             self, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
         scr.callback_scroll_add(self._scrolled)
@@ -192,7 +231,6 @@ class Document(Table):
             scr, size_hint_weight=EXPAND_BOTH, size_hint_align=(0.5, 0.0))
         scr.content = box
 
-        self.elm_event_callback_add(self._event_handler)
         self.on_resize_add(self._resized)
 
         toolbox = Table(
@@ -274,11 +312,15 @@ class Document(Table):
             )
         p.content = ol_gl
 
+        t1 = time.clock()
         for outline in outlines:
             if isinstance(outline, list):
                 GenlistItem(oll_glic, outline, None, ELM_GENLIST_ITEM_TREE).append_to(ol_gl)
             else:
                 GenlistItem(ol_glic, outline, None, ELM_GENLIST_ITEM_NONE, self._outline_clicked_cb, outline).append_to(ol_gl)
+
+        t2 = time.clock()
+        log.debug("Populating outlines took: %f", t2-t1)
 
         ol_gl.callback_contract_request_add(self._gl_contract_req)
         ol_gl.callback_contracted_add(self._gl_contracted)
@@ -375,13 +417,6 @@ class Document(Table):
         viewport_width = self.scr.region[2]
 
         self.zoom *= viewport_width/widest
-
-    def _event_handler(self, obj, src, tp, ev):
-        if tp == EVAS_CALLBACK_KEY_UP:
-            if ev.key == "plus":
-                self.zoom_in()
-            elif ev.key == "minus":
-                self.zoom_out()
 
     @staticmethod
     def _viewport_in(obj, ei, n):

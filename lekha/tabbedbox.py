@@ -182,6 +182,14 @@ class Tabs(Box):
             self.callback_call("tabs,empty")
         return True
 
+    def hide_tabs(self):
+        self.unpack(self._scr)
+        self._scr.hide()
+
+    def show_tabs(self):
+        self.pack_start(self._scr)
+        self._scr.show()
+
 
 class Tab(object):
 
