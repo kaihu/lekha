@@ -161,7 +161,7 @@ class AppWindow(StandardWindow):
 
         doc = Document(self, doc_path, doc_pos, doc_zoom)
         self.docs.append(doc)
-        tab = Tab("Untitled", doc)
+        tab = Tab(os.path.splitext(os.path.basename(doc_path))[0], doc)
 
         def title_changed(doc, title):
             tab.name = title
@@ -200,6 +200,7 @@ class Document(Table):
         self.doc_pos = pos
         self.pages = []
         self.doc = None
+        self.doc_title = os.path.splitext(os.path.basename(path))[0]
 
         super(Document, self).__init__(
             parent, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
@@ -318,31 +319,38 @@ class Document(Table):
         def worker_check(t):
             if t.is_alive():
                 return True
-            if self.doc:
+            if self.doc and self.page_count:
                 spn.special_value_add(self.page_count, "Last")
                 spn.min_max = (1, self.page_count)
-                info = self.doc.getDocumentInfo()
-
-                log.info(
-                    "%s %s %s %s %s",
-                    info.title, info.author, info.subject, info.creator, info.producer)
-
-                if info.title:
-                    self.doc_title = "{0}".format(info.title)
+                try:
+                    info = self.doc.getDocumentInfo()
+                except Exception:
+                    pass
                 else:
-                    self.doc_title = doc_path
-                self.callback_call("title,changed", self.doc_title)
+                    log.info(
+                        "%s %s %s %s %s",
+                        info.title, info.author, info.subject, info.creator, info.producer)
 
-                self.populate_pages()
-            else:
-                pass  # TODO: Notify of error
+                    if info.title:
+                        self.doc_title = "{0}".format(info.title)
+                    else:
+                        self.doc_title = doc_path
+                    self.callback_call("title,changed", self.doc_title)
+
+                    self.populate_pages()
+                    return False
+
+            self.load_notify.content.delete()
+            l = Label(
+                self.load_notify, style="marker",
+                text="Document load error", color=(255, 0, 0, 255))
+            self.load_notify.content = l
+            l.show()
 
         timer = Timer(0.2, worker_check, t)
         self.parent.callback_delete_request_add(lambda x: timer.delete())
 
     def populate_pages(self):
-        # page_count = int(doc.trailer["/Root"]["/Pages"]["/Count"])
-
         try:
             itr = iter(xrange(self.page_count))
         except Exception:
