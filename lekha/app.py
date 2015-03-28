@@ -333,8 +333,6 @@ class Document(Table):
 
                     if info.title:
                         self.doc_title = "{0}".format(info.title)
-                    else:
-                        self.doc_title = doc_path
                     self.callback_call("title,changed", self.doc_title)
 
                     self.populate_pages()
