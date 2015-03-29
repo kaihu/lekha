@@ -208,7 +208,7 @@ class Document(Table):
         scr = self.scr = Scroller(
             self, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
         scr.callback_scroll_add(self._scrolled)
-        self.pack(scr, 0, 0, 1, 1)
+        self.pack(scr, 0, 0, 4, 5)
         scr.show()
 
         box = self.page_box = Box(
@@ -217,28 +217,25 @@ class Document(Table):
 
         self.on_resize_add(self._resized)
 
-        toolbox = Table(
-            self, size_hint_weight=EXPAND_HORIZ, size_hint_align=FILL_HORIZ)
-
         btn = Button(
-            toolbox, text="Toggle outlines", size_hint_align=ALIGN_LEFT)
+            self, text="Toggle outlines", size_hint_align=ALIGN_LEFT)
         btn.callback_clicked_add(lambda x: self.ol_p.toggle())
-        toolbox.pack(btn, 0, 0, 1, 1)
+        self.pack(btn, 0, 5, 1, 1)
         btn.show()
 
         spn = self.spn = Spinner(
-            toolbox, round=1.0,
+            self, round=1.0,
             size_hint_weight=EXPAND_HORIZ, size_hint_align=FILL_HORIZ)
         spn.special_value_add(1, "First")
         spn.editable = True
-        toolbox.pack(spn, 1, 0, 1, 1)
+        self.pack(spn, 1, 5, 1, 1)
         spn.show()
 
         btn = Button(
-            toolbox, text="show page",
+            self, text="show page",
             size_hint_weight=EXPAND_HORIZ, size_hint_align=ALIGN_LEFT)
         btn.callback_clicked_add(self._show_page_cb, spn)
-        toolbox.pack(btn, 2, 0, 1, 1)
+        self.pack(btn, 2, 5, 1, 1)
         btn.show()
 
         menu = Menu(self.top_widget)
@@ -261,14 +258,11 @@ class Document(Table):
             menu.show()
 
         zlbl = self.zlbl = Button(
-            toolbox, text="%1.0f %%" % (self.zoom * 100.0),
+            self, text="%1.0f %%" % (self.zoom * 100.0),
             size_hint_weight=EXPAND_HORIZ, size_hint_align=ALIGN_RIGHT)
         zlbl.callback_clicked_add(z_clicked)
-        toolbox.pack(zlbl, 3, 0, 1, 1)
+        self.pack(zlbl, 3, 5, 1, 1)
         zlbl.show()
-
-        self.pack(toolbox, 0, 1, 1, 1)
-        toolbox.show()
 
         n = self.page_notify = Notify(scr, align=(0.02, 0.02))
         b = Box(n, horizontal=True, padding=(6, 0))
@@ -284,8 +278,8 @@ class Document(Table):
             self, orient=ELM_PANEL_ORIENT_LEFT, hidden=True,
             size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH,
             scrollable=True, scrollable_content_size=0.35)
-        self.pack(p, 0, 0, 1, 1)
-        p.show()
+        scr.on_move_add(lambda x: p.move(*x.pos))
+        scr.on_resize_add(lambda x: p.resize(*x.size))
 
         ol_gl = self.ol_gl = Genlist(
             p, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH,
@@ -300,6 +294,7 @@ class Document(Table):
         ol_gl.callback_expanded_add(self._gl_expanded)
         ol_gl.show()
 
+        p.show()
         self.show()
 
         def read_worker():
