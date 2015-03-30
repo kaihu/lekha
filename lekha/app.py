@@ -59,6 +59,7 @@ from efl.elementary.genlist import Genlist, GenlistItem, GenlistItemClass, \
     ELM_GENLIST_ITEM_TREE, ELM_GENLIST_ITEM_NONE, ELM_LIST_COMPRESS, \
     ELM_OBJECT_SELECT_MODE_ALWAYS
 from efl.elementary.menu import Menu
+from efl.elementary.popup import Popup
 
 import PyPDF2
 
@@ -303,7 +304,7 @@ class Document(Table):
                 self.doc = PyPDF2.PdfFileReader(path)
                 self.page_count = self.doc.getNumPages()
             except Exception as e:
-                log.exception("Document could not be opened because: %r" % e)
+                log.exception("Document could not be opened because: %r", e)
                 return
             t2 = time.clock()
             log.info("Reading the doc took: %f", t2-t1)
@@ -317,21 +318,14 @@ class Document(Table):
             if self.doc and self.page_count:
                 spn.special_value_add(self.page_count, "Last")
                 spn.min_max = (1, self.page_count)
-                try:
-                    info = self.doc.getDocumentInfo()
-                except Exception:
-                    pass
-                else:
-                    log.info(
-                        "%s %s %s %s %s",
-                        info.title, info.author, info.subject, info.creator, info.producer)
 
-                    if info.title:
-                        self.doc_title = "{0}".format(info.title)
-                    self.callback_call("title,changed", self.doc_title)
-
-                    self.populate_pages()
+                if self.doc.isEncrypted:
+                    PasswordPrompt(self)
                     return False
+
+                self.metadata_read()
+                self.populate_pages()
+                return False
 
             self.load_notify.content.delete()
             l = Label(
@@ -342,6 +336,20 @@ class Document(Table):
 
         timer = Timer(0.2, worker_check, t)
         self.parent.callback_delete_request_add(lambda x: timer.delete())
+
+    def metadata_read(self):
+        try:
+            info = self.doc.getDocumentInfo()
+        except Exception:
+            log.warn("Metadata information could not be extracted from the document")
+        else:
+            log.info(
+                "%s %s %s %s %s",
+                info.title, info.author, info.subject, info.creator, info.producer)
+
+            if info.title:
+                self.doc_title = "{0}".format(info.title)
+            self.callback_call("title,changed", self.doc_title)
 
     def populate_pages(self):
         try:
@@ -668,6 +676,46 @@ class Fs(Window):
         fs.callback_done_add(lambda x, y: self.delete())
         fs.show()
         self.show()
+
+
+class PasswordPrompt(Popup):
+
+    def __init__(self, parent):
+        Popup.__init__(self, parent)
+
+        self.part_text_set("title,text", "Document is encrypted")
+
+        e = self.e = Entry(self, password=True)
+        e.part_text_set("guide", "Enter Password")
+        self.content_set(e)
+        e.show()
+
+        okb = Button(self, text="OK")
+        self.part_content_set("button1", okb)
+        okb.callback_clicked_add(lambda x: self.okcb())
+        okb.show()
+
+        canb = Button(self, text="Cancel")
+        self.part_content_set("button2", canb)
+        canb.callback_clicked_add(lambda x: self.delete())
+        canb.show()
+
+        self.show()
+
+    def okcb(self):
+        ret = 0
+        try:
+            ret = self.parent.doc.decrypt(self.e.entry)
+        except Exception:
+            log.exception()
+            return
+        if ret:
+            self.parent.metadata_read()
+            self.parent.populate_pages()
+            self.delete()
+        else:
+            self.part_text_set("title,text", "Document is encrypted - Invalid password entered")
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Presenter of writings")
