@@ -28,11 +28,11 @@ from xdg import BaseDirectory
 import efl.elementary as elm
 import efl.evas as evas
 
-from lekha import AppWindow
+from lekha.app import AppWindow
 
 parser = argparse.ArgumentParser(description="Presenter of writings")
 parser.add_argument(
-    'documents', metavar='pdf', type=str, nargs='+',
+    'documents', metavar='pdf', type=str, nargs='*',
     help='documents you may want to display')
 args = parser.parse_args()
 
@@ -46,14 +46,14 @@ efl_log.addHandler(handler)
 
 log = logging.getLogger("lekha")
 log.addHandler(handler)
-log.setLevel(logging.ERROR)
+log.setLevel(logging.WARN)
 
 evas.init()
 elm.init()
 
 elm.policy_set(elm.ELM_POLICY_QUIT, elm.ELM_POLICY_QUIT_LAST_WINDOW_CLOSED)
 
-docs_pos = {}
+doc_specs = {}
 
 cfg_base_path = BaseDirectory.save_config_path("lekha")
 cfg_file_path = os.path.join(cfg_base_path, "document_positions")
@@ -66,36 +66,29 @@ if not os.path.exists(cfg_file_path):
 
 with open(cfg_file_path, "r") as fp:
     try:
-        docs_pos = json.load(fp)
+        doc_specs = json.load(fp)
     except Exception:
         log.info("document positions could not be restored")
 
-app = AppWindow()
+app = AppWindow(doc_specs)
 
 docs = []
 
 for doc_path in args.documents:
-    try:
-        doc_zoom, doc_pos = docs_pos[doc_path]
-        assert isinstance(doc_zoom, float), "zoom is not float"
-        assert isinstance(doc_pos, list), "pos is not tuple"
-        assert len(doc_pos) == 4, "pos len is not 4"
-    except Exception as e:
-        log.info("document zoom and position could not be restored because: %r", e)
-        doc_pos = (0, 0, 0, 0)
-        doc_zoom = 1.0
-    docs.append(app.document_open(doc_path, doc_zoom, doc_pos))
+    app.document_open(doc_path)
+
+app.show()
 
 elm.run()
 
-for d in docs:
+for d in app.docs:
     path = d.doc_path
     zoom = d.zoom
     pos = d.doc_pos
-    docs_pos[path] = (zoom, pos)
+    doc_specs[path] = (zoom, pos)
 
 with open(cfg_file_path, "w") as fp:
-    json.dump(docs_pos, fp, indent=4, separators=(',', ': '))
+    json.dump(doc_specs, fp, indent=4, separators=(',', ': '))
 
 elm.shutdown()
 evas.shutdown()

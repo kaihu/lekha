@@ -67,6 +67,8 @@ from xdg import BaseDirectory
 
 from .tabbedbox import Tabs, Tab
 
+log = logging.getLogger("lekha")
+
 
 class AppWindow(StandardWindow):
 
@@ -737,9 +739,8 @@ if __name__ == "__main__":
     efl_log = logging.getLogger("efl")
     efl_log.addHandler(handler)
 
-    log = logging.getLogger("lekha")
     log.addHandler(handler)
-    log.setLevel(logging.WARN)
+    log.setLevel(logging.DEBUG)
 
     evas.init()
     elm.init()
