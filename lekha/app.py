@@ -100,6 +100,11 @@ class AppWindow(StandardWindow):
         #     "tab,added", lambda x, y: self.title_set(y.doc_title))
         tabs.callback_add(
             "tab,selected", lambda x, y: self.title_set(y.doc_title))
+        def selected_cb(tabs, content):
+            for c in content.page_box:
+                c.changed()
+        tabs.callback_add(
+            "tab,selected", selected_cb)
         tabs.callback_add(
             "tab,deleted", lambda x, y: y.delete())
 
