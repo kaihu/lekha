@@ -316,7 +316,8 @@ class Document(Table):
             t2 = time.clock()
             log.info("Reading the doc took: %f", t2-t1)
 
-        t = Thread(target=read_worker, daemon=True)
+        t = Thread(target=read_worker)
+        t.daemon = True
         t.start()
 
         def worker_check(t):
@@ -400,7 +401,8 @@ class Document(Table):
                 self.outlines = doc.outlines
 
             t1 = time.clock()
-            t = Thread(target=outlines_get, daemon=True)
+            t = Thread(target=outlines_get)
+            t.daemon = True
             t.start()
 
             def check_outlines(t):
@@ -712,9 +714,9 @@ class PasswordPrompt(Popup):
     def okcb(self):
         ret = 0
         try:
-            ret = self.parent.doc.decrypt(self.e.entry)
+            ret = self.parent.doc.decrypt(self.e.entry.encode("utf-8"))
         except Exception:
-            log.exception()
+            log.exception("Could not decrypt the document")
             return
         if ret:
             self.parent.metadata_read()

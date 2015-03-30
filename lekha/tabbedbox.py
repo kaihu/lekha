@@ -293,9 +293,14 @@ if __name__ == "__main__":
     win = StandardWindow("test", "test", autodel=True)
 
     tabs = Tabs(win, size_hint_weight=EXPAND_BOTH, size_hint_fill=FILL_BOTH)
-    tabs.callback_add("tab,added", lambda x, y: print("added", y))
-    tabs.callback_add("tab,selected", lambda x, y: print("selected", y))
-    tabs.callback_add("tab,deleted", lambda x, y: print("deleted", y))
+
+    def added(tabs, content): print("added", content)
+    def selected(tabs, content): print("selected", content)
+    def deleted(tabs, content): print("deleted", content)
+
+    tabs.callback_add("tab,added", added)
+    tabs.callback_add("tab,selected", selected)
+    tabs.callback_add("tab,deleted", deleted)
 
     for i in range(20):
         lbl = Label(win, text="Tab %s" % i)
