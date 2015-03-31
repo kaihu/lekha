@@ -2,10 +2,11 @@
 Name=Lekha
 GenericName=PDF Viewer
 Comment=A simple PDF viewer
-Exec=lekha
+Exec=lekha %U
 Icon=accessories-document-viewer
 Terminal=false
 Type=Application
 Categories=Office;Viewer;X-EFL;
 Actions=Window;Document;
 StartupWMClass=lekha
+MimeType=application/pdf;

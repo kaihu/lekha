@@ -26,6 +26,7 @@ import argparse
 import json
 import os
 from threading import Thread
+import mimetypes
 
 from efl.ecore import Idler, Timer
 
@@ -150,6 +151,14 @@ class AppWindow(StandardWindow):
     def document_open(self, doc_path):
         if not doc_path:
             return
+
+        mt = mimetypes.guess_type(doc_path)
+        if mt[0] != "application/pdf":
+            log.error("%s does not seem to be a pdf document", doc_path)
+            return
+
+        if doc_path.startswith("file://"):
+            doc_path = doc_path[7:]
 
         if doc_path in self.doc_specs:
             doc_zoom, doc_pos = self.doc_specs[doc_path]

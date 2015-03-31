@@ -3,7 +3,7 @@ from distutils.core import setup
 setup(
     name='Lekha',
     description='A simple PDF viewer',
-    version="0.1.0",
+    version="0.1.1",
     author='Kai Huuhko',
     author_email='kai.huuhko@gmail.com',
     url='http://www.enlightenment.org/',
