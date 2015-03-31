@@ -27,6 +27,10 @@ import json
 import os
 from threading import Thread
 import mimetypes
+try:
+    from urllib import unquote
+except ImportError:
+    from urllib.parse import unquote
 
 from efl.ecore import Idler, Timer
 
@@ -158,7 +162,7 @@ class AppWindow(StandardWindow):
             return
 
         if doc_path.startswith("file://"):
-            doc_path = doc_path[7:]
+            doc_path = unquote(doc_path[7:])
 
         if doc_path in self.doc_specs:
             doc_zoom, doc_pos = self.doc_specs[doc_path]
