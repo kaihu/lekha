@@ -13,4 +13,4 @@ Install:
   (sudo) python setup.py install
 
 
-![screenshot](https://www.enlightenment.org/ss/e-55107cddb2ba83.22412110.jpg "Screenshot")
+![screenshot](https://www.enlightenment.org/ss/e-55511fafe962b5.69067897.jpg "Screenshot")
