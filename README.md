@@ -6,6 +6,10 @@ Requirements:
 
 Install:
 
+  From pypi:
+  (sudo) pip install Lekha
+
+  Manually:
   (sudo) python setup.py install
 
 
