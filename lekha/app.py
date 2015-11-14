@@ -65,6 +65,9 @@ from efl.elementary.genlist import Genlist, GenlistItem, GenlistItemClass, \
     ELM_OBJECT_SELECT_MODE_ALWAYS
 from efl.elementary.menu import Menu
 from efl.elementary.popup import Popup
+from efl.elementary.check import Check
+from efl.elementary.hover import Hover
+from efl.elementary.list import List, ELM_LIST_EXPAND
 
 import PyPDF2
 
@@ -83,6 +86,8 @@ class AppWindow(StandardWindow):
         self.docs = []
         self.doc_specs = doc_specs
 
+        self.settings = {"scroll_by_page": False}
+
         super(AppWindow, self).__init__(
             "main", "Lekha",
             size=(400 * SCALE, 400 * SCALE),
@@ -99,6 +104,7 @@ class AppWindow(StandardWindow):
             "document-open", "Open", lambda x, y: Fs(self.document_open))
         tb.item_append(
             "view-fullscreen", "Fullscreen", lambda x, y: self.fullscreen_set(True))
+        it = tb.item_append("preferences-system", "Settings", self._settings_open)
 
         tabs = self.tabs = Tabs(
             main_box, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
@@ -128,14 +134,27 @@ class AppWindow(StandardWindow):
 
     def _event_handler(self, obj, src, tp, ev):
         if tp == EVAS_CALLBACK_MOUSE_WHEEL:
-            if ev.direction == 0:
-                if (
-                        self.tabs.currentContent and
-                        self.tabs.currentContent.scroll_freeze_get()):
+            content = self.tabs.currentContent
+            if not content:
+                return True
+            if content.scroll_freeze_get():
+                if ev.direction == 0:
                     if ev.z == 1:
-                        self.tabs.currentContent.zoom_out()
+                        content.zoom_out()
                     else:
-                        self.tabs.currentContent.zoom_in()
+                        content.zoom_in()
+                    ev.event_flags |= EVAS_EVENT_FLAG_ON_HOLD
+            elif self.settings["scroll_by_page"]: # TODO: setting for this
+                if ev.direction == 0:
+                    visible = content.visible_pages
+                    if not visible:
+                        return True
+                    visible = visible[0]
+                    if ev.z == 1:
+                        content.page_show_by_num(visible+1)
+                    else:
+                        content.page_show_by_num(visible-1)
+                    ev.event_flags |= EVAS_EVENT_FLAG_ON_HOLD
         elif tp == EVAS_CALLBACK_KEY_UP:
             key = ev.key
             if key == "plus":
@@ -150,13 +169,21 @@ class AppWindow(StandardWindow):
             elif key == "F11":
                 self.fullscreen = not self.fullscreen
             elif key == "Control_L" or key == "Control_R":
-                self.tabs.currentContent.scroll_thaw()
+                if self.tabs.currentContent:
+                    self.tabs.currentContent.scroll_thaw()
+            else:
+                return True
+            ev.event_flags |= EVAS_EVENT_FLAG_ON_HOLD
         elif tp == EVAS_CALLBACK_KEY_DOWN:
             key = ev.key
             if key == "Control_L" or key == "Control_R":
-                self.tabs.currentContent.scroll_freeze()
+                if self.tabs.currentContent:
+                    self.tabs.currentContent.scroll_freeze()
+            else:
+                return True
+            ev.event_flags |= EVAS_EVENT_FLAG_ON_HOLD
 
-        ev.event_flags |= EVAS_EVENT_FLAG_ON_HOLD
+        return True
 
     @staticmethod
     def _fullscreen_cb(win):
@@ -207,6 +234,31 @@ class AppWindow(StandardWindow):
         doc.callback_add("title,changed", title_changed)
         self.tabs.append(tab)
 
+    def _settings_open(self, obj, it):
+        h = Hover(self)
+        t = it.track_object
+        h.pos = t.bottom_center
+        del t
+        del it.track_object
+
+        l = List(h)
+        l.mode = ELM_LIST_EXPAND
+        h.part_content_set("bottom", l)
+        l.show()
+
+        chk = Check(self, text="Scroll By Page")
+        chk.state = self.settings["scroll_by_page"]
+        def _scroll_by_page_cb(obj):
+            self.settings["scroll_by_page"] = obj.state
+            h.dismiss()
+        chk.callback_changed_add(_scroll_by_page_cb)
+
+        l.item_append(None, chk)
+        l.go()
+
+        h.show()
+        #chk.callback_clicked_add()
+
 
 class OutLine(GenlistItemClass):
 
@@ -240,6 +292,7 @@ class Document(Table):
         self.pages = []
         self.doc = None
         self.doc_title = os.path.splitext(os.path.basename(path))[0]
+        self.visible_pages = []
 
         super(Document, self).__init__(
             parent, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
@@ -507,8 +560,8 @@ class Document(Table):
 
         self.zoom *= viewport_width/widest
 
-    @staticmethod
-    def _viewport_in(obj, ei, n):
+    def _viewport_in(self, obj, ei, n):
+        self.visible_pages.append(obj.page_num)
         l = obj.page_num_label
         b = n.content
         b.pack_end(l)
@@ -516,8 +569,8 @@ class Document(Table):
         l.show()
         n.show()
 
-    @staticmethod
-    def _viewport_out(obj, ei, n):
+    def _viewport_out(self, obj, ei, n):
+        self.visible_pages.remove(obj.page_num)
         l = obj.page_num_label
         b = n.content
         b.unpack(l)
@@ -549,6 +602,10 @@ class Document(Table):
                 break
 
     def page_show_by_num(self, pg_num):
+        if pg_num < 0:
+            pg_num = 0
+        elif pg_num > self.page_count - 1:
+            pg_num = -1
         pg_id, pg = self.pages[pg_num]
         self.page_show(pg)
 
