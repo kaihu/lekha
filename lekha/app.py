@@ -435,7 +435,12 @@ class Document(Table):
             info = self.doc.getDocumentInfo()
         except Exception:
             log.warn("Metadata information could not be extracted from the document")
+            return
         else:
+            if not info:
+                log.warn("Metadata information could not be extracted from the document")
+                return
+
             log.info(
                 "%s %s %s %s %s",
                 info.title, info.author, info.subject, info.creator, info.producer)
