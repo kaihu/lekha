@@ -133,18 +133,18 @@ class AppWindow(StandardWindow):
         main_box.show()
 
     def _event_handler(self, obj, src, tp, ev):
+        content = self.tabs.currentContent
         if tp == EVAS_CALLBACK_MOUSE_WHEEL:
-            content = self.tabs.currentContent
             if not content:
                 return True
-            if content.scroll_freeze_get():
+            if ev.modifier_is_set("Control"):
                 if ev.direction == 0:
                     if ev.z == 1:
                         content.zoom_out()
                     else:
                         content.zoom_in()
                     ev.event_flags |= EVAS_EVENT_FLAG_ON_HOLD
-            elif self.settings["scroll_by_page"]: # TODO: setting for this
+            elif self.settings["scroll_by_page"]:
                 if ev.direction == 0:
                     visible = content.visible_pages
                     if not visible:
@@ -158,27 +158,43 @@ class AppWindow(StandardWindow):
         elif tp == EVAS_CALLBACK_KEY_UP:
             key = ev.key
             if key == "plus":
-                if self.tabs.currentContent:
-                    self.tabs.currentContent.zoom_in()
+                if content:
+                    content.zoom_in()
             elif key == "minus":
-                if self.tabs.currentContent:
-                    self.tabs.currentContent.zoom_out()
+                if content:
+                    content.zoom_out()
             elif key == "Escape":
                 if self.fullscreen:
                     self.fullscreen = False
             elif key == "F11":
                 self.fullscreen = not self.fullscreen
             elif key == "Control_L" or key == "Control_R":
-                if self.tabs.currentContent:
-                    self.tabs.currentContent.scroll_thaw()
+                if content:
+                    content.scroll_thaw()
+            elif key == "Page_Up" or key == "Up":
+                if self.settings["scroll_by_page"]:
+                    visible = content.visible_pages
+                    if not visible:
+                        return True
+                    visible = visible[0]
+                    content.page_show_by_num(visible-1)
+                    ev.event_flags |= EVAS_EVENT_FLAG_ON_HOLD
+            elif key == "Page_Down" or key == "Down":
+                if self.settings["scroll_by_page"]:
+                    visible = content.visible_pages
+                    if not visible:
+                        return True
+                    visible = visible[0]
+                    content.page_show_by_num(visible+1)
+                    ev.event_flags |= EVAS_EVENT_FLAG_ON_HOLD
             else:
                 return True
             ev.event_flags |= EVAS_EVENT_FLAG_ON_HOLD
         elif tp == EVAS_CALLBACK_KEY_DOWN:
             key = ev.key
             if key == "Control_L" or key == "Control_R":
-                if self.tabs.currentContent:
-                    self.tabs.currentContent.scroll_freeze()
+                if content:
+                    content.scroll_freeze()
             else:
                 return True
             ev.event_flags |= EVAS_EVENT_FLAG_ON_HOLD
@@ -249,7 +265,13 @@ class AppWindow(StandardWindow):
         chk = Check(self, text="Scroll By Page")
         chk.state = self.settings["scroll_by_page"]
         def _scroll_by_page_cb(obj):
-            self.settings["scroll_by_page"] = obj.state
+            target_state = obj.state
+            self.settings["scroll_by_page"] = target_state
+            if self.tabs.currentContent:
+                if target_state:
+                    self.tabs.currentContent.scroll_freeze()
+                else:
+                    self.tabs.currentContent.scroll_thaw()
             h.dismiss()
         chk.callback_changed_add(_scroll_by_page_cb)
 
