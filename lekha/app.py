@@ -322,7 +322,7 @@ class Document(Table):
         scr = self.scr = Scroller(
             self, size_hint_weight=EXPAND_BOTH, size_hint_align=FILL_BOTH)
         scr.callback_scroll_add(self._scrolled)
-        self.pack(scr, 0, 0, 4, 5)
+        self.pack(scr, 0, 0, 4, 1)
         scr.show()
 
         box = self.page_box = Box(
@@ -334,7 +334,7 @@ class Document(Table):
         btn = Button(
             self, text="Toggle outlines", size_hint_align=ALIGN_LEFT)
         btn.callback_clicked_add(lambda x: self.ol_p.toggle())
-        self.pack(btn, 0, 5, 1, 1)
+        self.pack(btn, 0, 1, 1, 1)
         btn.show()
 
         spn = self.spn = Spinner(
@@ -342,14 +342,14 @@ class Document(Table):
             size_hint_weight=EXPAND_HORIZ, size_hint_align=FILL_HORIZ)
         spn.special_value_add(1, "First")
         spn.editable = True
-        self.pack(spn, 1, 5, 1, 1)
+        self.pack(spn, 1, 1, 1, 1)
         spn.show()
 
         btn = Button(
             self, text="show page",
             size_hint_weight=EXPAND_HORIZ, size_hint_align=ALIGN_LEFT)
         btn.callback_clicked_add(self._show_page_cb, spn)
-        self.pack(btn, 2, 5, 1, 1)
+        self.pack(btn, 2, 1, 1, 1)
         btn.show()
 
         menu = Menu(self.top_widget)
@@ -375,7 +375,7 @@ class Document(Table):
             self, text="%1.0f %%" % (self.zoom * 100.0),
             size_hint_weight=EXPAND_HORIZ, size_hint_align=ALIGN_RIGHT)
         zlbl.callback_clicked_add(z_clicked)
-        self.pack(zlbl, 3, 5, 1, 1)
+        self.pack(zlbl, 3, 1, 1, 1)
         zlbl.show()
 
         n = self.page_notify = Notify(scr, align=(0.02, 0.02))
