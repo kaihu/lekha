@@ -595,7 +595,7 @@ class Document(Table):
         l = obj.page_num_label
         b = n.content
         b.pack_end(l)
-        n.timeout = 3
+        n.timeout = 3.0
         l.show()
         n.show()
 
@@ -604,6 +604,7 @@ class Document(Table):
         l = obj.page_num_label
         b = n.content
         b.unpack(l)
+        n.timeout = 3.0
         l.hide()
         n.show()
 
