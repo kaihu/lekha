@@ -58,7 +58,7 @@ from efl.elementary.toolbar import Toolbar, ELM_OBJECT_SELECT_MODE_NONE
 from efl.elementary.fileselector import Fileselector
 from efl.elementary.background import Background
 from efl.elementary.table import Table
-from efl.elementary.entry import Entry
+from efl.elementary.entry import Entry, utf8_to_markup
 from efl.elementary.panel import Panel, ELM_PANEL_ORIENT_LEFT
 from efl.elementary.genlist import Genlist, GenlistItem, GenlistItemClass, \
     ELM_GENLIST_ITEM_TREE, ELM_GENLIST_ITEM_NONE, ELM_LIST_COMPRESS, \
@@ -419,6 +419,8 @@ class Document(Table):
                 self.page_count = self.doc.getNumPages()
             except Exception as e:
                 log.exception("Document could not be opened because: %r", e)
+                self.doc = None
+                self.display_error(e)
                 return
             t2 = time.clock()
             log.info("Reading the doc took: %f", t2-t1)
@@ -430,7 +432,7 @@ class Document(Table):
         def worker_check(t):
             if t.is_alive():
                 return True
-            if self.doc and self.page_count:
+            elif self.doc and self.page_count:
                 spn.special_value_add(self.page_count, "Last")
                 spn.min_max = (1, self.page_count)
 
@@ -442,15 +444,16 @@ class Document(Table):
                 self.populate_pages()
                 return False
 
-            self.load_notify.content.delete()
-            l = Label(
-                self.load_notify, style="marker",
-                text="Document load error", color=(255, 0, 0, 255))
-            self.load_notify.content = l
-            l.show()
-
         timer = Timer(0.2, worker_check, t)
         self.parent.callback_delete_request_add(lambda x: timer.delete())
+
+    def display_error(self, exc):
+        self.load_notify.content.delete()
+        l = Label(
+            self.load_notify, style="marker",
+            text="Document load error: %s" % utf8_to_markup(str(exc)), color=(255, 0, 0, 255))
+        self.load_notify.content = l
+        l.show()
 
     def metadata_read(self):
         try:
