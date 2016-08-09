@@ -1,6 +1,6 @@
 Requirements:
 
-  - >=python-efl-1.13.99
+  - >=python-efl-1.14.0
   - PyPDF2
   - pyxdg
 
